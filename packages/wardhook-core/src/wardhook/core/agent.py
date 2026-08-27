@@ -261,7 +261,10 @@ class AgentGraph:
             return None
         if telemetry is True:
             try:
-                from wardhook.observability import Tracer
+                # The ignore below is temporary: wardhook-observability is still
+                # in progress and does not export Tracer yet. Drop it when the
+                # package lands -- the runtime path here is already correct.
+                from wardhook.observability import Tracer  # type: ignore[attr-defined]
             except ImportError as exc:
                 raise MissingIntegrationError(
                     "telemetry=True needs the wardhook-observability package, which "
