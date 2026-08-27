@@ -184,11 +184,11 @@ Pre-1.0 and built in the open. All four packages are complete.
 | wardhook-evals | ✅ Complete | 143 | 95% |
 | wardhook (meta) | ✅ Complete | — | n/a |
 
-Not yet published to PyPI, so the version badges above will read "not
-found" until the first release; everything else in this repository works today.
-Publishing runs through [PyPI Trusted Publishing](docs/releasing.md) on a
-version tag — there is no API token stored anywhere here. Install from source in
-the meantime:
+All five distributions are on PyPI as of 0.1.0. Releases run through
+[PyPI Trusted Publishing](docs/releasing.md) on a version tag — there is no API
+token stored anywhere in this repository.
+
+To work on it rather than use it:
 
 ```bash
 git clone https://github.com/justicebajaj161/wardhook.git

@@ -30,7 +30,7 @@ pip install wardhook
 `wardhook` is a meta-package containing no code. It installs the four above,
 pinned to matching versions.
 
-Not yet on PyPI — until the first release, install from source:
+To work on Wardhook itself rather than use it, install from source:
 
 ```bash
 git clone https://github.com/justicebajaj161/wardhook.git

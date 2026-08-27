@@ -13,8 +13,9 @@ repository, this workflow file, and this environment.
 
 ## One-time setup
 
-Nothing is published until this is done. Until then,
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) is inert.
+Done once, before the first release. It is recorded here because the
+constraints below are not obvious and are easy to hit again if a package is ever
+added.
 
 Add a **pending publisher** for each of the five projects at
 <https://pypi.org/manage/account/publishing/>. PyPI caps you at three pending
