@@ -11,4 +11,6 @@ Runnable examples available today:
 Both run fully offline against a fake model and need no API key.
 """
 
+# wardhook-ci: skip -- CI does not execute this example until it is written.
+
 raise SystemExit(__doc__)

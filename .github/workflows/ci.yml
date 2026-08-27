@@ -114,7 +114,7 @@ jobs:
         run: |
           for script in examples/*.py; do
             [ -f "$script" ] || continue
-            grep -q "Placeholder" "$script" && { echo "skip (not written yet): $script"; continue; }
+            grep -q "wardhook-ci: skip" "$script" && { echo "skip (not written yet): $script"; continue; }
             echo "==> $script"
             uv run python "$script"
           done
