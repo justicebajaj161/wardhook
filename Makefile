@@ -21,9 +21,10 @@ help: ## Show this help
 install: ## Create the dev environment with all four packages editable
 	uv sync
 
-lint: ## Lint and check formatting (does not modify files)
+lint: ## Lint, check formatting, and validate the CI workflows
 	uv run ruff check .
 	uv run ruff format --check .
+	uv run ./scripts/check-workflows.sh
 
 fmt: ## Autofix lint findings and format
 	uv run ruff check --fix .

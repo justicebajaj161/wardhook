@@ -28,6 +28,10 @@ jobs:
         run: uv run ruff check .
       - name: ruff format --check
         run: uv run ruff format --check .
+      - name: Validate the workflows themselves
+        # An unterminated quote in a `run:` block is valid YAML and a broken
+        # shell script. Without this it costs a CI run to find out.
+        run: uv run ./scripts/check-workflows.sh
 
   types:
     name: Type-check ${{ matrix.package }}
@@ -183,4 +187,4 @@ jobs:
           for script in wardhook wardhook-trace wardhook-eval; do
             test -x ".venv-meta/bin/$script" || { echo "::error::$script missing"; exit 1; }
           done
-          echo "wardhook, wardhook-trace and wardhook-eval all present
+          echo "wardhook, wardhook-trace and wardhook-eval all present"
