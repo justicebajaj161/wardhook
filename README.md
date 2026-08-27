@@ -154,13 +154,13 @@ No base class, no import, no dependency. Full rationale in
 
 ## Project status
 
-Pre-1.0 and built in the open. Two packages are complete; two are in progress.
+Pre-1.0 and built in the open. Three packages are complete; one is in progress.
 
 | Package | Status | Tests | Coverage |
 | --- | --- | --- | --- |
-| wardhook-core | ✅ Complete | 163 | — |
-| wardhook-guardrails | ✅ Complete | 188 | 97% |
-| wardhook-observability | 🚧 In progress | — | — |
+| wardhook-core | ✅ Complete | 163 | 92% |
+| wardhook-guardrails | ✅ Complete | 196 | 98% |
+| wardhook-observability | ✅ Complete | 127 | 96% |
 | wardhook-evals | 🚧 In progress | — | — |
 
 Not yet published to PyPI — the badges above are placeholders until the first
@@ -202,6 +202,22 @@ evidence a reviewer needs — not a guarantee, and not a substitute for limiting
 what the agent can reach in the first place. That position is argued in full in
 [the guardrails design doc](docs/packages/guardrails.md#limitations) rather than
 buried.
+
+### Audit logging records blocks and redactions, not allows
+
+`AuditLogger` defaults to `record_allows=False`. An allow is the overwhelmingly
+common outcome, and logging every one buries the handful of actions a reviewer
+opened the file to find. Turn it on where a regime expects positive evidence
+that every request was screened:
+
+```python
+AuditLogger("audit.jsonl", record_allows=True)
+```
+
+This is a deliberate departure from a literal reading of "log every guardrail
+action", made because a trail nobody can read is not a control. The reasoning
+is in [the design doc](docs/packages/guardrails.md); the behaviour is one
+constructor argument either way.
 
 ## Contributing
 

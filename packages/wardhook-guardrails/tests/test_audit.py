@@ -236,3 +236,30 @@ class TestReport:
         audit_log.log(guardrail="a", action="block", stage="input")
         audit_log.log(guardrail="b", action="block", stage="input")
         assert audit_log.report(audit_log.events[:1])["total_events"] == 1
+
+    def test_fingerprints_reach_the_written_record(self, audit_log):
+        # fingerprint() is the mechanism for correlating "the same SSN appeared
+        # again" without storing the SSN. It is only useful if log() actually
+        # carries the digests through to the event and the file.
+        digest = audit_log.fingerprint("123-45-6789")
+        event = audit_log.log(
+            guardrail="pii",
+            action="redact",
+            stage="output",
+            run_id="r1",
+            rule="US_SSN",
+            fingerprints=[digest],
+        )
+
+        assert event.fingerprints == (digest,)
+        assert event.to_dict()["fingerprints"] == [digest]
+        assert "123-45-6789" not in event.to_json()
+        assert digest in event.to_json()
+
+    def test_the_same_value_fingerprints_identically_within_a_session(self, audit_log):
+        assert audit_log.fingerprint("a@b.com") == audit_log.fingerprint("a@b.com")
+        assert audit_log.fingerprint("a@b.com") != audit_log.fingerprint("c@d.com")
+
+    def test_events_without_fingerprints_omit_the_key(self, audit_log):
+        event = audit_log.log(guardrail="pii", action="block", stage="output")
+        assert "fingerprints" not in event.to_dict()

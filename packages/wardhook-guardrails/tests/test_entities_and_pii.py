@@ -278,3 +278,28 @@ class TestRedaction:
         record = redactor.on_output("ssn 123-45-6789", {}).to_dict()
         assert "123-45-6789" not in str(record)
         assert record["action"] == "redact"
+
+    def test_a_clean_result_reports_low_severity(self, redactor):
+        # max_severity has to answer for the no-matches case too, and LOW is
+        # the honest answer -- not an exception, and not the severity of a
+        # match that never happened.
+        result = redactor.redact("nothing sensitive here at all")
+        assert not result.found
+        assert result.max_severity is Severity.LOW
+        assert result.counts == {}
+
+    def test_nhs_number_whose_check_digit_computes_to_eleven(self):
+        # The NHS checksum yields `11 - remainder`; when remainder is 0 that is
+        # 11, which is not a digit and wraps to 0. Easy branch to get wrong,
+        # and it silently rejects a whole class of valid numbers.
+        detector = PIIDetector(pack="healthcare")
+        matches = detector.detect("NHS number 1000000060")
+
+        assert [match.entity for match in matches] == ["NHS_NUMBER"]
+        assert matches[0].validated
+
+    def test_nhs_number_with_a_check_digit_of_ten_is_rejected(self):
+        # 10 is not expressible as a single check digit, so such a number
+        # cannot be valid however plausible it looks.
+        detector = PIIDetector(pack="healthcare")
+        assert detector.detect("NHS number 1000000015") == []

@@ -9,8 +9,11 @@ the development environment has all four packages installed -- an import of a
 sibling would succeed there and the violation would go unnoticed until someone
 installed this package on its own.
 
-These tests are meaningful while the package is still being implemented: the
-dependency boundary is the property most easily broken during the build.
+Note what is *not* in the dependency list: ``langgraph``. This package can
+instrument a LangGraph graph, but it does not need LangGraph to exist -- node
+boundaries are read from the ``langchain-core`` callback stream, and everything
+else works against any object exposing ``.invoke()``. Requiring LangGraph here
+would force it on someone tracing a plain chain.
 """
 
 from __future__ import annotations
@@ -62,7 +65,9 @@ def test_the_package_imports_and_declares_a_version():
 
 
 def test_the_scan_actually_finds_source_files():
-    assert SOURCE_FILES, "expected at least one module to scan"
+    # A real floor, not a truthiness check: if the scan silently stopped
+    # finding modules, every test below would pass while checking nothing.
+    assert len(SOURCE_FILES) >= 10, f"expected the package's modules, found {SOURCE_FILES}"
 
 
 @pytest.mark.parametrize("path", SOURCE_FILES, ids=lambda p: p.name)
@@ -91,3 +96,23 @@ def test_third_party_imports_stay_within_the_declared_dependencies():
         f"unexpected third-party imports: {sorted(unexpected)}. Add the "
         f"dependency to pyproject.toml deliberately, or drop the import."
     )
+
+
+def test_the_tracer_satisfies_the_core_telemetry_contract_without_importing_it():
+    # Core drives telemetry structurally: it calls these five methods and never
+    # imports this package's types. Asserting the shape here means a change to
+    # a signature fails in this package's own suite, not only downstream.
+    from wardhook.observability import Tracer
+
+    tracer = Tracer()
+    for name in ("start_run", "end_run", "start_node", "end_node", "callbacks"):
+        assert callable(getattr(tracer, name, None)), f"Tracer has no {name}()"
+
+    tracer.start_run("r1", {"agent": "demo"})
+    tracer.start_node("call_model", "r1")
+    tracer.end_node("call_model", "r1", None)
+    tracer.end_run("r1", None)
+
+    assert list(tracer.callbacks()), "callbacks() must return handlers to attach"
+    # AgentGraph.trace() calls get_trace(run_id) positionally, with None allowed.
+    assert tracer.get_trace(None).run_id == "r1"

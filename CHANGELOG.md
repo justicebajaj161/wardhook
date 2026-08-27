@@ -28,6 +28,17 @@ All four packages are versioned in lockstep while the project is pre-1.0.
   scorer across seven categories. Deny-by-default role-based access control for
   tool calls. A JSONL audit logger whose records describe what changed without
   ever containing the data being audited.
+- **wardhook-observability** — `Tracer`, a telemetry sink satisfying core's
+  `TelemetryProtocol`, recording per-node latency, token usage, and estimated
+  cost. Token counts are read from the provider's own `usage_metadata` rather
+  than re-tokenised locally. A cache-aware cost model that prices the uncached
+  remainder, so cached tokens are not billed twice, over a price table carrying
+  its own `PRICES_AS_OF` date and overridable with `register_price()`.
+  `instrument()` traces a graph you already built by reading LangGraph's
+  callback stream rather than patching its internals. `JSONLTraceStore` for
+  durable history, a bounded in-memory ring for long-lived processes, and
+  `render_html()` plus a `wardhook-trace` CLI producing a single self-contained
+  HTML page that makes no network requests.
 
 ### Notes
 

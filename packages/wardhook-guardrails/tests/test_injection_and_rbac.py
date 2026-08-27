@@ -231,3 +231,22 @@ class TestRoleBasedToolPolicy:
         # that here so the boundary is explicit.
         big = policy.on_tool_call("issue_refund", {"amount": 10**9}, ctx("supervisor"))
         assert big.allowed
+
+    def test_a_weak_signal_scores_medium_without_blocking(self):
+        # The opaque-payload category is weight 0.3: suspicious enough to
+        # surface in a report, not enough to block on its own. That band
+        # existing at all is the point -- a detector with only "clean" and
+        # "blocked" cannot express "worth a look".
+        detector = InjectionDetector()
+        report = detector.score("Attached is the signed PDF: " + "A" * 40 + "b7Kq" * 8)
+
+        assert 0.0 < report.score < 0.5
+        assert report.severity is Severity.MEDIUM
+        assert not report.blocked
+        assert report.categories == ["opaque_payload"]
+
+    def test_clean_text_scores_low(self):
+        report = InjectionDetector().score("Show me the rules for filing a storm claim.")
+        assert report.score == 0.0
+        assert report.severity is Severity.LOW
+        assert not report.blocked
