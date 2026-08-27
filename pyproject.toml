@@ -1,0 +1,174 @@
+# Wardhook monorepo root.
+#
+# This file is NOT a distributable package. It exists to (a) declare the uv
+# workspace so `uv sync` wires all four packages together for development, and
+# (b) hold the single shared lint / type / test configuration that every
+# package is checked against. Each package under `packages/` carries its own
+# `pyproject.toml` with its own metadata and dependencies, and is published
+# independently.
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+wardhook-core = { workspace = true }
+wardhook-guardrails = { workspace = true }
+wardhook-observability = { workspace = true }
+wardhook-evals = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "wardhook-core",
+    "wardhook-guardrails",
+    "wardhook-observability",
+    "wardhook-evals",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.9",
+    "mypy>=1.14",
+    "types-PyYAML>=6.0",
+    "build>=1.2",
+    "twine>=5.0",
+    "httpx>=0.27",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff -- linting and formatting. Enforced in CI by `ruff check` and
+# `ruff format --check`; there is no second formatter in this project.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [".venv", ".venv-*", "build", "dist"]
+src = [
+    "packages/wardhook-core/src",
+    "packages/wardhook-guardrails/src",
+    "packages/wardhook-observability/src",
+    "packages/wardhook-evals/src",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "D",    # pydocstyle -- public API must be documented
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "A",    # flake8-builtins
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "ARG",  # flake8-unused-arguments
+    "PTH",  # flake8-use-pathlib
+    "RET",  # flake8-return
+    "TID",  # flake8-tidy-imports
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "D107",  # __init__ docstring -- documented on the class instead
+    "D203",  # incompatible with D211
+    "D213",  # incompatible with D212
+    "E501",  # line length is handled by the formatter
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests document themselves through their names; examples favour readability
+# over docstring ceremony.
+"**/tests/**" = ["D100", "D101", "D102", "D103", "D104", "ARG001", "ARG002"]
+"examples/**" = ["D100", "D103", "T201"]
+"tests/**" = ["D100", "D101", "D102", "D103", "D104"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+# ---------------------------------------------------------------------------
+# Mypy -- type checking. Run per package in CI so a package is never typed
+# against a sibling it does not depend on.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+# Type-checked against 3.12 because some dependency stubs (NumPy 2.5) are
+# written with PEP 695 syntax that mypy cannot parse under an older target.
+# Real 3.10 compatibility is enforced by ruff's `target-version = "py310"`
+# and by the CI test matrix, which runs the suites on 3.10 through 3.13.
+python_version = "3.12"
+namespace_packages = true
+explicit_package_bases = true
+# With a src layout and a PEP 420 namespace, mypy cannot infer module names
+# from file paths without being told where each source root begins.
+mypy_path = [
+    "packages/wardhook-core/src",
+    "packages/wardhook-guardrails/src",
+    "packages/wardhook-observability/src",
+    "packages/wardhook-evals/src",
+]
+check_untyped_defs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+warn_return_any = true
+strict_equality = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*", "*.tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+# Third-party packages without bundled type information.
+module = ["langgraph.*", "pypdf.*", "chromadb.*", "uvicorn.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+# consider_namespace_packages lets pytest resolve the PEP 420 `wardhook.*` tree.
+consider_namespace_packages = true
+# --import-mode=importlib: four packages each ship a tests/conftest.py, which
+#   collide under the default "prepend" mode because they share a module name.
+# --doctest-modules: verify every example in a docstring on each run.
+addopts = "-ra --strict-markers --strict-config --doctest-modules --import-mode=importlib"
+# Source trees are included so `--doctest-modules` verifies every example in a
+# docstring. A documented example that drifts out of date is a broken promise.
+testpaths = [
+    "packages/wardhook-core/src",
+    "packages/wardhook-guardrails/src",
+    "packages/wardhook-observability/src",
+    "packages/wardhook-evals/src",
+    "packages/wardhook-core/tests",
+    "packages/wardhook-guardrails/tests",
+    "packages/wardhook-observability/tests",
+    "packages/wardhook-evals/tests",
+    "tests",
+]
+markers = [
+    "integration: requires two or more wardhook packages to be installed",
+    "live: hits a real model provider; skipped unless an API key is present",
+]
+filterwarnings = ["error::DeprecationWarning:wardhook.*"]
+
+[tool.coverage.run]
+branch = true
+source = ["wardhook"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+]

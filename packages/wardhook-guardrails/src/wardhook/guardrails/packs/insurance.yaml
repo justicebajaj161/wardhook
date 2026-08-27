@@ -1,0 +1,46 @@
+# Insurance entity pack.
+#
+# Extends `default`, adding the identifiers that carry risk in a carrier or
+# broker context. Claim and policy numbers are not PII on their own, but they
+# are the join key to a person's entire file, so they are treated as sensitive.
+
+name: insurance
+extends: default
+description: Identifiers specific to insurance carriers, brokers, and TPAs.
+
+rules:
+  - entity: POLICY_NUMBER
+    pattern: '\b(?:POL|PLC|P)[-/]?\d{6,12}\b'
+    severity: high
+    description: Policy number.
+
+  - entity: CLAIM_NUMBER
+    pattern: '\b(?:CLM|CLA|C)[-/]?\d{6,12}\b'
+    severity: high
+    description: Claim reference.
+
+  - entity: VIN
+    pattern: '\b[A-HJ-NPR-Z0-9]{17}\b'
+    severity: medium
+    description: Vehicle identification number. Excludes I, O and Q per ISO 3779.
+
+  - entity: LICENSE_PLATE
+    pattern: '\b[A-Z]{2}\d{2}\s?[A-Z]{3}\b'
+    severity: medium
+    context_words: ['plate', 'registration', 'vehicle', 'reg no', 'licence', 'license']
+    description: Vehicle registration plate, required to appear near a vehicle term.
+
+  - entity: NCD_YEARS
+    pattern: '\b\d{1,2}\s*years?\s+no[- ]claims?\b'
+    severity: low
+    description: No-claims discount history.
+
+  - entity: ADJUSTER_ID
+    pattern: '\b(?:ADJ|LA)[-/]?\d{4,8}\b'
+    severity: low
+    description: Loss adjuster identifier.
+
+  - entity: BROKER_CODE
+    pattern: '\bBRK[-/]?[A-Z0-9]{4,10}\b'
+    severity: low
+    description: Broker or intermediary code.

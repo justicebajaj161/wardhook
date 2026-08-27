@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wardhook-guardrails"
+version = "0.1.0"
+description = "Config-driven PII redaction, prompt-injection detection, tool-call RBAC, and compliance-grade audit logging for LLM agents."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Aditya Gupta", email = "adityabajaj161@gmail.com" }]
+maintainers = [{ name = "Aditya Gupta", email = "adityabajaj161@gmail.com" }]
+keywords = ["pii", "redaction", "guardrails", "prompt-injection", "rbac", "audit", "compliance", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Security",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+# Deliberately dependency-light: this package is regex and heuristics only, so
+# it can be dropped into any agent without dragging in an ML stack.
+dependencies = ["PyYAML>=6.0"]
+
+[project.urls]
+Homepage = "https://github.com/justicebajaj161/wardhook"
+Documentation = "https://github.com/justicebajaj161/wardhook/blob/main/docs/packages/guardrails.md"
+Repository = "https://github.com/justicebajaj161/wardhook"
+Issues = "https://github.com/justicebajaj161/wardhook/issues"
+Changelog = "https://github.com/justicebajaj161/wardhook/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wardhook"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "tests/", "README.md", "LICENSE"]

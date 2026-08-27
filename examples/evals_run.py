@@ -1,0 +1,14 @@
+"""Example: wardhook-evals.
+
+Not yet written -- this example is added when the package it demonstrates is
+complete. See README.md at the repository root for current project status.
+
+Runnable examples available today:
+
+    python examples/core_rag_agent.py     # retrieval with real source citations
+    python examples/guardrails_pii.py     # PII, injection scoring, RBAC, audit
+
+Both run fully offline against a fake model and need no API key.
+"""
+
+raise SystemExit(__doc__)

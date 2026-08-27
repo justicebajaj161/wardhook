@@ -1,0 +1,75 @@
+# Universal entity pack.
+#
+# Entities here appear in essentially every domain, so the three specialised
+# packs extend this one rather than restating it.
+#
+# Patterns are matched case-insensitively. Where a shape alone produces too
+# many false positives, a rule carries either a `validator` (a checksum) or
+# `context_words` (nearby terms that must be present). Detection is
+# pattern-based by design -- see docs/packages/guardrails.md for what that
+# does and does not buy you.
+
+name: default
+description: Entities common to every domain.
+
+rules:
+  - entity: EMAIL
+    pattern: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
+    severity: medium
+    description: Email address.
+
+  - entity: PHONE
+    pattern: '(?<![\w-])(?<!\d[\s.-])(?:\+\d{1,3}[\s.-]?)?(?:\(\d{2,5}\)[\s.-]?|\d{2,5}[\s.-])?\d{3,4}[\s.-]\d{3,6}(?![\s.-]?\d)(?![\w-])'
+    severity: medium
+    # The lookarounds matter: without them this pattern reads any run of
+    # spaced digit groups (a card number, a long reference) as a phone
+    # number, and mid-sequence backtracking finds a "phone" inside one.
+    description: International or national telephone number.
+
+  - entity: IP_ADDRESS
+    pattern: '\b(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\b'
+    severity: low
+    description: IPv4 address.
+
+  - entity: US_SSN
+    pattern: '\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0{4})\d{4}\b'
+    severity: high
+    description: United States Social Security Number.
+
+  - entity: CREDIT_CARD
+    pattern: '\b(?:\d[ -]?){12,18}\d\b'
+    severity: critical
+    validator: luhn
+    description: Payment card number, confirmed by a Luhn checksum.
+
+  - entity: DATE_OF_BIRTH
+    pattern: '\b(?:0?[1-9]|[12]\d|3[01])[/-](?:0?[1-9]|1[0-2])[/-](?:19|20)\d{2}\b'
+    severity: high
+    context_words: ['dob', 'date of birth', 'born', 'birthday', 'birthdate']
+    description: Date of birth, required to appear near a birth-related term.
+
+  - entity: API_KEY
+    pattern: '\b(?:sk|pk|rk)[-_](?:live|test|proj)?[-_]?[A-Za-z0-9]{16,}\b'
+    severity: critical
+    description: Provider-style secret key.
+
+  - entity: AWS_ACCESS_KEY
+    pattern: '\b(?:AKIA|ASIA|AIDA|AROA)[0-9A-Z]{16}\b'
+    severity: critical
+    description: AWS access key identifier.
+
+  - entity: BEARER_TOKEN
+    pattern: '\bBearer\s+[A-Za-z0-9\-._~+/]{20,}=*'
+    severity: critical
+    description: HTTP bearer token.
+
+  - entity: PASSPORT
+    pattern: '\b[A-Z]{1,2}\d{6,9}\b'
+    severity: high
+    context_words: ['passport', 'travel document']
+    description: Passport number, required to appear near a passport term.
+
+  - entity: POSTAL_ADDRESS
+    pattern: '\b\d{1,5}\s+(?:[A-Z][a-z]+\s){1,3}(?:Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd|Court|Ct|Way)\b'
+    severity: medium
+    description: Street address.

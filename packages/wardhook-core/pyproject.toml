@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wardhook-core"
+version = "0.1.0"
+description = "LangGraph agent runtime with tool calling, RAG with source citations, and a one-command FastAPI server."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Aditya Gupta", email = "adityabajaj161@gmail.com" }]
+maintainers = [{ name = "Aditya Gupta", email = "adityabajaj161@gmail.com" }]
+keywords = ["langgraph", "langchain", "agent", "rag", "llm", "ai", "fastapi"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "langgraph>=1.2,<2",
+    "langchain-core>=1.4,<2",
+    "pydantic>=2.7,<3",
+    "numpy>=1.24",
+    "pypdf>=4.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "typer>=0.12",
+    "typing-extensions>=4.9",
+]
+
+[project.optional-dependencies]
+anthropic = ["langchain-anthropic>=1.0"]
+openai = ["langchain-openai>=1.0"]
+chroma = ["chromadb>=0.5"]
+all = ["langchain-anthropic>=1.0", "langchain-openai>=1.0", "chromadb>=0.5"]
+
+[project.scripts]
+wardhook = "wardhook.core.serve.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/justicebajaj161/wardhook"
+Documentation = "https://github.com/justicebajaj161/wardhook/blob/main/docs/packages/core.md"
+Repository = "https://github.com/justicebajaj161/wardhook"
+Issues = "https://github.com/justicebajaj161/wardhook/issues"
+Changelog = "https://github.com/justicebajaj161/wardhook/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wardhook"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "tests/", "README.md", "LICENSE", "Dockerfile"]

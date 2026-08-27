@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.9.7"
+
+jobs:
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen || uv sync
+      - name: ruff check
+        run: uv run ruff check .
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+  types:
+    name: Type-check ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - wardhook-core
+          - wardhook-guardrails
+          - wardhook-observability
+          - wardhook-evals
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen || uv sync
+      - run: uv run mypy packages/${{ matrix.package }}/src
+
+  test:
+    # The load-bearing job. Each package is installed into an environment
+    # containing NO other Wardhook package, then its own suite runs there. If a
+    # package ever reaches for a sibling, this fails -- which is what makes
+    # "each package works standalone" a checked property and not a claim.
+    name: ${{ matrix.package }} alone on py${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - wardhook-core
+          - wardhook-guardrails
+          - wardhook-observability
+          - wardhook-evals
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Install only this package
+        run: |
+          uv venv --python ${{ matrix.python }} .venv-solo
+          VIRTUAL_ENV=.venv-solo uv pip install -e packages/${{ matrix.package }} pytest pytest-cov httpx
+      - name: Confirm no sibling package leaked in
+        run: |
+          .venv-solo/bin/python - <<'PY'
+          import sys
+          here = "${{ matrix.package }}".replace("wardhook-", "")
+          siblings = {"core", "guardrails", "observability", "evals"} - {here}
+          leaked = []
+          for name in sorted(siblings):
+              try:
+                  __import__(f"wardhook.{name}")
+                  leaked.append(name)
+              except ModuleNotFoundError:
+                  pass
+          if leaked:
+              sys.exit(f"FAIL: wardhook.{{{','.join(leaked)}}} importable in a solo install")
+          print(f"OK: wardhook.{here} is installed alone")
+          PY
+      - name: Run this package's suite
+        run: |
+          .venv-solo/bin/python -m pytest packages/${{ matrix.package }}/tests \
+            -q -p no:cacheprovider --import-mode=importlib -c /dev/null
+
+  integration:
+    name: All four together
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen || uv sync
+      - name: Full suite, including doctests
+        run: uv run pytest -q
+      - name: Runnable examples
+        run: |
+          for script in examples/*.py; do
+            [ -f "$script" ] || continue
+            grep -q "Placeholder" "$script" && { echo "skip (not written yet): $script"; continue; }
+            echo "==> $script"
+            uv run python "$script"
+          done
+
+  build:
+    name: Build and validate distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen || uv sync
+      - name: Build all four
+        run: |
+          for package in wardhook-core wardhook-guardrails wardhook-observability wardhook-evals; do
+            uv run python -m build --outdir dist "packages/$package"
+          done
+      - run: uv run twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/

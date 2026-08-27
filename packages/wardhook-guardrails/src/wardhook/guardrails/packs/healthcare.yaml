@@ -1,0 +1,57 @@
+# Healthcare entity pack.
+#
+# Extends `default` with clinical identifiers. Under HIPAA the identifier and
+# the clinical fact are equally sensitive, and several of these shapes (a bare
+# six-digit MRN, for example) are far too generic to match on their own -- so
+# they require nearby context words. That trades some recall for a large drop
+# in false positives, which is the right trade when the alternative is
+# redacting every six-digit number in a document.
+
+name: healthcare
+extends: default
+description: Clinical and health-insurance identifiers (HIPAA-oriented).
+
+rules:
+  - entity: MRN
+    pattern: '\b(?:MRN|MR)[-# :]?\d{6,10}\b'
+    severity: critical
+    description: Medical record number with an explicit prefix.
+
+  - entity: MRN_BARE
+    pattern: '\b\d{6,10}\b'
+    severity: critical
+    context_words: ['mrn', 'medical record', 'patient number', 'patient id', 'chart number']
+    description: Bare medical record number, required to appear near a record term.
+
+  - entity: NHS_NUMBER
+    pattern: '\b\d{3}[ -]?\d{3}[ -]?\d{4}\b'
+    severity: critical
+    validator: nhs
+    description: UK NHS number, confirmed by its modulus-11 check digit.
+
+  - entity: NPI
+    pattern: '\b\d{10}\b'
+    severity: medium
+    context_words: ['npi', 'national provider', 'provider id', 'provider number']
+    description: US National Provider Identifier, required to appear near a provider term.
+
+  - entity: MEDICARE_ID
+    pattern: '\b[1-9][AC-HJ-KM-NP-RT-Y][AC-HJ-KM-NP-RT-Y0-9]\d[AC-HJ-KM-NP-RT-Y][AC-HJ-KM-NP-RT-Y0-9]\d[AC-HJ-KM-NP-RT-Y]{2}\d{2}\b'
+    severity: critical
+    description: US Medicare Beneficiary Identifier.
+
+  - entity: ICD_CODE
+    pattern: '\b[A-TV-Z]\d{2}(?:\.\d{1,4})?\b'
+    severity: high
+    context_words: ['icd', 'diagnosis', 'diagnosed', 'coded', 'condition']
+    description: ICD-10 diagnosis code, required to appear near a diagnosis term.
+
+  - entity: HEALTH_PLAN_ID
+    pattern: '\b(?:HP|PLAN|MBR)[-/]?[A-Z0-9]{6,12}\b'
+    severity: high
+    description: Health plan or member identifier.
+
+  - entity: PRESCRIPTION_NUMBER
+    pattern: '\b(?:RX|SCRIPT)[-# :]?\d{6,10}\b'
+    severity: high
+    description: Prescription number.
