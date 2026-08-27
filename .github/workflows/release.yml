@@ -104,8 +104,10 @@ jobs:
           - wardhook-observability
           - wardhook-evals
     environment:
+      # On a tag push `inputs` is empty, so this resolves to `pypi` -- which
+      # must match the Environment name configured on the PyPI publisher.
       name: ${{ inputs.repository || 'pypi' }}
-      url: https://pypi.org/p/${{ matrix.package }}
+      url: ${{ inputs.repository == 'testpypi' && 'https://test.pypi.org/p/' || 'https://pypi.org/p/' }}${{ matrix.package }}
     permissions:
       # Required for Trusted Publishing. This is the only credential involved;
       # there is no API token anywhere in this repository.
