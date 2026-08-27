@@ -146,6 +146,14 @@ jobs:
           packages-dir: dist/${{ matrix.package }}
           repository-url: ${{ inputs.repository == 'testpypi' && 'https://test.pypi.org/legacy/' || '' }}
           print-hash: true
+          # Defaults to false, which makes a re-run fail on anything already
+          # uploaded. Five independent projects mean a release can land
+          # partially -- one project's publisher misconfigured, a transient
+          # upload error -- and the fix is always "register/repair, then re-run".
+          # Without this, that re-run dies on the four that already succeeded.
+          # PyPI refuses to overwrite a released file regardless, so this
+          # changes re-run ergonomics, not what can be clobbered.
+          skip-existing: true
 
   publish-meta:
     # The `wardhook` meta-package pins the other four to an exact version, so it
@@ -172,3 +180,4 @@ jobs:
           packages-dir: dist/wardhook
           repository-url: ${{ inputs.repository == 'testpypi' && 'https://test.pypi.org/legacy/' || '' }}
           print-hash: true
+          skip-existing: true

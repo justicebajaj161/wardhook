@@ -17,7 +17,9 @@ Nothing is published until this is done. Until then,
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) is inert.
 
 Add a **pending publisher** for each of the five projects at
-<https://pypi.org/manage/account/publishing/>. Owner `justicebajaj161`,
+<https://pypi.org/manage/account/publishing/>. PyPI caps you at three pending
+publishers at a time, so the first release goes out in two passes — see
+[The first release takes two passes](#the-first-release-takes-two-passes). Owner `justicebajaj161`,
 repository `wardhook`, and workflow `release.yml` every time — but **a different
 environment name for each**:
 
@@ -118,16 +120,42 @@ matching GitHub environments. The workflow's manual trigger targets either.
 | `publish` | One job per real package, each in its own environment and so with its own OIDC identity. `fail-fast` is off, so a failure on one does not cancel a sibling mid-upload. |
 | `publish-meta` | `wardhook` last, after the four it pins. Publishing it first would leave a window in which `pip install wardhook` cannot resolve. |
 
+## The first release takes two passes
+
+PyPI allows **at most three *pending* trusted publishers per user**
+(`warehouse/accounts/views.py`), and there are five projects here. That is a
+spam control on unused registrations, not a queue — nobody at PyPI or GitHub
+reviews or approves anything.
+
+A publisher is "pending" only in the sense that its project does not exist yet.
+The first successful upload creates the project and *reifies* the pending
+publisher into an ordinary project-scoped one, which frees the slot. So:
+
+1. Register three: `wardhook-core`, `wardhook-guardrails`,
+   `wardhook-observability`. Leave `wardhook-evals` and `wardhook` for now —
+   the meta-package publishes last anyway, so registering it early wastes a slot.
+2. Tag and push. Three projects publish; `wardhook-evals` fails with no
+   publisher configured, and `publish-meta` is skipped because `publish` did not
+   fully succeed. That is the intended behaviour, not a broken release.
+3. Register the remaining two. All three slots are free now.
+4. **Re-run all jobs** on the same workflow run. The three already-published
+   projects skip, `wardhook-evals` uploads, and `publish-meta` follows.
+
+From the second release onwards this never happens again: all five projects
+exist, their publishers are ordinary, and the pending limit is irrelevant.
+
 ## If a publish fails partway
 
-PyPI does not allow overwriting a released version, and the four projects are
+PyPI does not allow overwriting a released version, and the five projects are
 independent, so a partial release leaves some at the new version and some
 behind.
 
-Re-running the workflow is safe: `pypa/gh-action-pypi-publish` skips a file that
-already exists rather than failing, so only the missing projects upload. If a
-released version is actually broken, **yank it rather than deleting it** — a
-deleted version breaks anyone who already pinned it, while a yanked one stays
+Re-running is safe because both publish steps set `skip-existing: true`. That is
+**not** the action's default — by default it fails on a file already present on
+the index, which would make every re-run die on whatever had already succeeded.
+
+If a released version is actually broken, **yank it rather than deleting it** —
+a deleted version breaks anyone who already pinned it, while a yanked one stays
 installable for existing pins and invisible to new resolutions. Then release a
 patch version.
 
