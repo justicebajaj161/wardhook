@@ -16,24 +16,57 @@ repository, this workflow file, and this environment.
 Nothing is published until this is done. Until then,
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) is inert.
 
-For each of the five projects — `wardhook-core`, `wardhook-guardrails`,
-`wardhook-observability`, `wardhook-evals`, and `wardhook` — add a **pending
-publisher** at <https://pypi.org/manage/account/publishing/>:
+Add a **pending publisher** for each of the five projects at
+<https://pypi.org/manage/account/publishing/>. Owner `justicebajaj161`,
+repository `wardhook`, and workflow `release.yml` every time — but **a different
+environment name for each**:
 
-| Field | Value |
+| PyPI project name | Environment name |
 | --- | --- |
-| PyPI project name | `wardhook-core` (and each of the other four) |
-| Owner | `justicebajaj161` |
-| Repository name | `wardhook` |
-| Workflow name | `release.yml` |
-| Environment name | `pypi` |
+| `wardhook-core` | `pypi-core` |
+| `wardhook-guardrails` | `pypi-guardrails` |
+| `wardhook-observability` | `pypi-observability` |
+| `wardhook-evals` | `pypi-evals` |
+| `wardhook` | `pypi-meta` |
 
-Then create a `pypi` environment in the repository settings
-(*Settings → Environments*). Adding a required reviewer there is worth doing:
-it means a tag push cannot publish without a human approving the run.
+### Why the environments must differ
 
-Repeat with the environment named `testpypi` on <https://test.pypi.org> if you
-want to rehearse. The workflow's manual trigger can target either.
+This is the part that catches people out, and it is worth understanding rather
+than copying.
+
+PyPI's uniqueness constraint on a *pending* publisher covers
+**(owner, repository, workflow, environment)** and deliberately **excludes the
+project name**. A pending publisher is allowed to create a project that does not
+exist yet, so PyPI has to be able to decide which name to create — and two
+pending publishers with identical external identity would be ambiguous.
+
+All five of these packages publish from one workflow file in one repository, so
+the environment is the only field left to tell them apart. Register a second one
+without a distinct environment and PyPI rejects it:
+
+> A pending trusted publisher matching this configuration has already been
+> registered for a different project name.
+
+Note also that the `pypi` shown greyed out in the Environment name box is
+**placeholder text, not a value**. Leaving the field alone saves the publisher
+with environment "(Any)", which collides with everything.
+
+The constraint applies only while a project is *pending*. Once a project exists,
+its publisher is attached to the project and the ambiguity is gone — but keeping
+one environment per package is worth doing anyway, because it lets you require a
+different reviewer for, say, `wardhook-core` than for the meta-package.
+
+### The GitHub side
+
+Create the five environments under *Settings → Environments*: `pypi-core`,
+`pypi-guardrails`, `pypi-observability`, `pypi-evals`, `pypi-meta`. GitHub will
+create them implicitly on first use, but making them yourself lets you add a
+required reviewer — worth it, since a tag is easy to push by accident and a PyPI
+release can only be yanked, never un-published.
+
+To rehearse on <https://test.pypi.org>, register the same five there with
+`testpypi-` prefixes instead (`testpypi-core`, …, `testpypi-meta`) and create
+matching GitHub environments. The workflow's manual trigger targets either.
 
 ## Cutting a release
 
@@ -82,7 +115,7 @@ want to rehearse. The workflow's manual trigger can target either.
 | --- | --- |
 | `verify` | ruff, ruff format, mypy per package, the full test suite. A tag is not evidence the tree was green when it was cut. |
 | `build` | Confirms every package declares the tagged version *and* that the meta-package's pins match it, builds each into its own directory, and runs `twine check`. |
-| `publish` | One job per real package, each with its own OIDC identity. `fail-fast` is off, so a failure on one does not cancel a sibling mid-upload. |
+| `publish` | One job per real package, each in its own environment and so with its own OIDC identity. `fail-fast` is off, so a failure on one does not cancel a sibling mid-upload. |
 | `publish-meta` | `wardhook` last, after the four it pins. Publishing it first would leave a window in which `pip install wardhook` cannot resolve. |
 
 ## If a publish fails partway

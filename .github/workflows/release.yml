@@ -108,15 +108,28 @@ jobs:
       # failed one, and a re-run must be able to fill in only what is missing.
       fail-fast: false
       matrix:
-        package:
-          - wardhook-core
-          - wardhook-guardrails
-          - wardhook-observability
-          - wardhook-evals
+        include:
+          - package: wardhook-core
+            slug: core
+          - package: wardhook-guardrails
+            slug: guardrails
+          - package: wardhook-observability
+            slug: observability
+          - package: wardhook-evals
+            slug: evals
     environment:
-      # On a tag push `inputs` is empty, so this resolves to `pypi` -- which
-      # must match the Environment name configured on the PyPI publisher.
-      name: ${{ inputs.repository || 'pypi' }}
+      # One environment per package, and that is not cosmetic. PyPI's unique
+      # constraint on a PENDING trusted publisher covers
+      # (owner, repository, workflow, environment) and deliberately excludes the
+      # project name -- so five packages publishing from one workflow file in
+      # one repository can only be told apart by their environment. Registering
+      # a second pending publisher without a distinct environment fails with
+      # "already been registered for a different project name".
+      #
+      # On a tag push `inputs` is empty, so this resolves to `pypi-core`,
+      # `pypi-guardrails`, and so on. Each must match the Environment name on
+      # the corresponding PyPI publisher exactly.
+      name: ${{ inputs.repository || 'pypi' }}-${{ matrix.slug }}
       url: ${{ inputs.repository == 'testpypi' && 'https://test.pypi.org/p/' || 'https://pypi.org/p/' }}${{ matrix.package }}
     permissions:
       # Required for Trusted Publishing. This is the only credential involved;
@@ -143,7 +156,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [publish]
     environment:
-      name: ${{ inputs.repository || 'pypi' }}
+      # `pypi-meta`, for the same reason the four above each have their own.
+      name: ${{ inputs.repository || 'pypi' }}-meta
       url: ${{ inputs.repository == 'testpypi' && 'https://test.pypi.org/p/wardhook' || 'https://pypi.org/p/wardhook' }}
     permissions:
       id-token: write
