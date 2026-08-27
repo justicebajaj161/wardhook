@@ -12,6 +12,7 @@
 [![PyPI guardrails](https://img.shields.io/pypi/v/wardhook-guardrails?label=wardhook-guardrails)](https://pypi.org/project/wardhook-guardrails/)
 [![PyPI observability](https://img.shields.io/pypi/v/wardhook-observability?label=wardhook-observability)](https://pypi.org/project/wardhook-observability/)
 [![PyPI evals](https://img.shields.io/pypi/v/wardhook-evals?label=wardhook-evals)](https://pypi.org/project/wardhook-evals/)
+[![PyPI meta](https://img.shields.io/pypi/v/wardhook?label=wardhook)](https://pypi.org/project/wardhook/)
 
 ---
 
@@ -37,6 +38,7 @@ agent you already own.
 | **[wardhook-guardrails](packages/wardhook-guardrails)** | PII redaction, prompt-injection scoring, tool RBAC, compliance audit trail | **PyYAML only** |
 | **[wardhook-observability](packages/wardhook-observability)** | Per-node tokens, cost, and latency; static HTML trace viewer | langchain-core, typer |
 | **[wardhook-evals](packages/wardhook-evals)** | JSONL test cases, pass/fail runner, baseline regression detection | typer only |
+| **[wardhook](packages/wardhook)** | Meta-package: installs all four at a matching version. No code of its own. | the four above |
 
 **Each installs and works completely alone.** That is not a claim in a README —
 CI installs each package in an isolated environment with no siblings present and
@@ -45,6 +47,8 @@ build fails.
 
 ## Install
 
+Take one:
+
 ```bash
 pip install wardhook-core            # the agent runtime
 pip install wardhook-guardrails      # PII, injection, RBAC, audit
@@ -52,7 +56,17 @@ pip install wardhook-observability   # tokens, cost, latency
 pip install wardhook-evals           # test cases and regression detection
 ```
 
-Take one. Take all four. Nothing changes for the others.
+Or take all four:
+
+```bash
+pip install wardhook                 # a meta-package; installs the four above
+```
+
+Nothing changes for the others either way. `wardhook` contains no code — it
+exists so you can write one line instead of four, and it pins each package to an
+exact version so `wardhook==0.1.0` means precisely the 0.1.0 set. Provider
+clients ride along as extras: `wardhook[anthropic]`, `[openai]`, `[chroma]`,
+`[judge]`, `[all]`.
 
 ## Quickstart
 
@@ -168,8 +182,9 @@ Pre-1.0 and built in the open. All four packages are complete.
 | wardhook-guardrails | ✅ Complete | 196 | 98% |
 | wardhook-observability | ✅ Complete | 127 | 96% |
 | wardhook-evals | ✅ Complete | 143 | 95% |
+| wardhook (meta) | ✅ Complete | — | n/a |
 
-Not yet published to PyPI, so the four version badges above will read "not
+Not yet published to PyPI, so the version badges above will read "not
 found" until the first release; everything else in this repository works today.
 Publishing runs through [PyPI Trusted Publishing](docs/releasing.md) on a
 version tag — there is no API token stored anywhere here. Install from source in

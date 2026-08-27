@@ -1,0 +1,83 @@
+# The `wardhook` meta-package.
+#
+# This distribution contains NO Python code. It exists so that
+# `pip install wardhook` gets you all four packages at a consistent version,
+# for people who want the whole toolkit and would rather not name each piece.
+#
+# It deliberately ships no `wardhook/__init__.py`. The four real packages share
+# the `wardhook.*` namespace through PEP 420, and a single `__init__.py`
+# anywhere in that tree would shadow the namespace and break every one of them.
+# `bypass-selection` below is what tells hatchling that an empty wheel is
+# intentional rather than a misconfiguration.
+
+[build-system]
+# Upper-bounded deliberately. hatchling 1.30.0 and 1.32.0 emit
+# `Metadata-Version: 2.5`, which `packaging` (and therefore `twine check` and
+# `twine upload`) reject as invalid -- a wheel built with them cannot be
+# published. Raise the bound once the packaging toolchain accepts 2.5.
+requires = ["hatchling>=1.27,!=1.30.*,<1.32"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wardhook"
+version = "0.1.0"
+description = "Governance and observability for LangGraph agents: installs all four Wardhook packages."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Aditya Gupta", email = "adityabajaj161@gmail.com" }]
+maintainers = [{ name = "Aditya Gupta", email = "adityabajaj161@gmail.com" }]
+keywords = ["langgraph", "agents", "guardrails", "observability", "evals", "governance"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# Pinned with `==` rather than a range, on purpose. The four packages are
+# released together from one tag and versioned in lockstep, so `wardhook==0.1.0`
+# means exactly "the 0.1.0 set" -- which is the only promise a meta-package can
+# usefully make. Anyone wanting to mix versions should depend on the individual
+# packages directly, which is the supported path and always has been.
+dependencies = [
+    "wardhook-core==0.1.0",
+    "wardhook-guardrails==0.1.0",
+    "wardhook-observability==0.1.0",
+    "wardhook-evals==0.1.0",
+]
+
+[project.optional-dependencies]
+# Pass-throughs, so `pip install wardhook[anthropic]` works the way someone
+# would expect without them having to know which package owns the extra.
+anthropic = ["wardhook-core[anthropic]==0.1.0"]
+openai = ["wardhook-core[openai]==0.1.0"]
+chroma = ["wardhook-core[chroma]==0.1.0"]
+judge = ["wardhook-evals[judge]==0.1.0"]
+all = [
+    "wardhook-core[all]==0.1.0",
+    "wardhook-evals[judge]==0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/justicebajaj161/wardhook"
+Documentation = "https://github.com/justicebajaj161/wardhook/blob/main/docs/quickstart.md"
+Repository = "https://github.com/justicebajaj161/wardhook"
+Issues = "https://github.com/justicebajaj161/wardhook/issues"
+Changelog = "https://github.com/justicebajaj161/wardhook/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+# There is no code to select. Without this, hatchling errors out looking for a
+# package directory to include.
+bypass-selection = true
+
+[tool.hatch.build.targets.sdist]
+include = ["README.md", "LICENSE", "pyproject.toml"]

@@ -129,9 +129,10 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv sync --frozen || uv sync
-      - name: Build all four
+      - name: Build all five
         run: |
-          for package in wardhook-core wardhook-guardrails wardhook-observability wardhook-evals; do
+          for package in wardhook-core wardhook-guardrails wardhook-observability \
+                         wardhook-evals wardhook; do
             uv run python -m build --outdir dist "packages/$package"
           done
       - run: uv run twine check dist/*
@@ -139,3 +140,47 @@ jobs:
         with:
           name: distributions
           path: dist/
+
+  meta:
+    # The `wardhook` meta-package ships no code, so nothing above exercises it.
+    # This is the only job that proves its one job: that installing it alone
+    # brings in all four packages, at versions that agree.
+    name: pip install wardhook
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+      - name: Install only the meta-package
+        run: |
+          uv venv --python 3.12 .venv-meta
+          VIRTUAL_ENV=.venv-meta uv pip install --find-links dist wardhook
+      - name: All four must be present, at one version
+        run: |
+          .venv-meta/bin/python - <<'PY'
+          from importlib.metadata import version
+          import wardhook.core, wardhook.guardrails, wardhook.observability, wardhook.evals
+
+          names = [
+              "wardhook",
+              "wardhook-core",
+              "wardhook-guardrails",
+              "wardhook-observability",
+              "wardhook-evals",
+          ]
+          seen = {name: version(name) for name in names}
+          assert len(set(seen.values())) == 1, f"versions out of lockstep: {seen}"
+          print(f"pip install wardhook -> all five at {seen['wardhook']}")
+          PY
+      - name: The console scripts must be on PATH
+        run: |
+          for script in wardhook wardhook-trace wardhook-eval; do
+            test -x ".venv-meta/bin/$script" || { echo "::error::$script missing"; exit 1; }
+          done
+          echo "wardhook, wardhook-trace and wardhook-eval all present

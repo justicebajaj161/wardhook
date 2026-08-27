@@ -3,11 +3,16 @@
 # Every target here has a one-to-one counterpart in .github/workflows/ci.yml,
 # so `make check` locally is the same gate that runs on a pull request.
 
+# The four real packages: these have source, tests, and must each install
+# alone. Used by `types`, `test`, and `solo`.
 PACKAGES := wardhook-core wardhook-guardrails wardhook-observability wardhook-evals
+# Plus the `wardhook` meta-package, which has no source and no tests but is
+# published like the rest. Used by `build`.
+ALL_PACKAGES := $(PACKAGES) wardhook
 PY ?= python3
 
 .DEFAULT_GOAL := help
-.PHONY: help install lint fmt types test test-cov solo build clean check
+.PHONY: help install lint fmt types test test-cov solo meta build clean check
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -58,7 +63,7 @@ solo: ## Prove each package installs and passes its tests entirely on its own
 	echo "==> all four packages are independently installable"
 
 build: ## Build wheels and sdists for all packages, then validate them
-	@set -e; rm -rf dist; for p in $(PACKAGES); do \
+	@set -e; rm -rf dist; for p in $(ALL_PACKAGES); do \
 		echo "==> build $$p"; \
 		uv run $(PY) -m build --outdir dist packages/$$p; \
 	done; \
@@ -68,5 +73,20 @@ clean: ## Remove build artifacts and caches
 	rm -rf dist build .venv-solo .pytest_cache .ruff_cache .mypy_cache .coverage htmlcov
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +
 	find . -name '*.egg-info' -type d -prune -exec rm -rf {} +
+
+meta: ## Prove `pip install wardhook` pulls in all four packages
+	@set -e; rm -rf dist .venv-meta; \
+	for p in $(ALL_PACKAGES); do \
+		uv run $(PY) -m build --quiet --outdir dist packages/$$p >/dev/null; \
+	done; \
+	uv venv --quiet .venv-meta; \
+	VIRTUAL_ENV=.venv-meta uv pip install --quiet --find-links dist wardhook; \
+	.venv-meta/bin/python -c "from importlib.metadata import version; \
+		import wardhook.core, wardhook.guardrails, wardhook.observability, wardhook.evals; \
+		names = ['wardhook','wardhook-core','wardhook-guardrails','wardhook-observability','wardhook-evals']; \
+		seen = {n: version(n) for n in names}; \
+		assert len(set(seen.values())) == 1, 'versions out of lockstep: %s' % seen; \
+		print('==> pip install wardhook -> ' + ', '.join(sorted(seen)) + ' all at ' + seen['wardhook'])"; \
+	rm -rf .venv-meta
 
 check: lint types test ## Run the full local gate (lint + types + tests)

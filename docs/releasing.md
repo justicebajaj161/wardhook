@@ -1,7 +1,8 @@
 # Releasing
 
-All four packages are versioned in lockstep while the project is pre-1.0, and
-are published together from one tag.
+All five distributions are versioned in lockstep while the project is pre-1.0,
+and are published together from one tag: the four real packages, plus the
+`wardhook` meta-package that installs them.
 
 Releases go out through [PyPI Trusted Publishing][tp], so there is no API token
 stored in this repository — nothing to leak, nothing to rotate. GitHub mints a
@@ -15,13 +16,13 @@ repository, this workflow file, and this environment.
 Nothing is published until this is done. Until then,
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) is inert.
 
-For each of the four projects — `wardhook-core`, `wardhook-guardrails`,
-`wardhook-observability`, `wardhook-evals` — add a **pending publisher** at
-<https://pypi.org/manage/account/publishing/>:
+For each of the five projects — `wardhook-core`, `wardhook-guardrails`,
+`wardhook-observability`, `wardhook-evals`, and `wardhook` — add a **pending
+publisher** at <https://pypi.org/manage/account/publishing/>:
 
 | Field | Value |
 | --- | --- |
-| PyPI project name | `wardhook-core` (and each of the other three) |
+| PyPI project name | `wardhook-core` (and each of the other four) |
 | Owner | `justicebajaj161` |
 | Repository name | `wardhook` |
 | Workflow name | `release.yml` |
@@ -36,8 +37,9 @@ want to rehearse. The workflow's manual trigger can target either.
 
 ## Cutting a release
 
-1. **Bump the version in five places.** The four `pyproject.toml` files and the
-   `__version__` in each package's `__init__.py`:
+1. **Bump the version everywhere.** Eleven declarations: five
+   `pyproject.toml` files, the `__version__` in each of the four packages'
+   `__init__.py`, and the meta-package's exact pins on all four.
 
    ```bash
    ./scripts/bump-version.sh 0.2.0
@@ -79,8 +81,9 @@ want to rehearse. The workflow's manual trigger can target either.
 | Job | What it checks |
 | --- | --- |
 | `verify` | ruff, ruff format, mypy per package, the full test suite. A tag is not evidence the tree was green when it was cut. |
-| `build` | Confirms every package declares the tagged version, builds each into its own directory, and runs `twine check`. |
-| `publish` | One job per package, each with its own OIDC identity. `fail-fast` is off, so a failure on one does not cancel a sibling mid-upload. |
+| `build` | Confirms every package declares the tagged version *and* that the meta-package's pins match it, builds each into its own directory, and runs `twine check`. |
+| `publish` | One job per real package, each with its own OIDC identity. `fail-fast` is off, so a failure on one does not cancel a sibling mid-upload. |
+| `publish-meta` | `wardhook` last, after the four it pins. Publishing it first would leave a window in which `pip install wardhook` cannot resolve. |
 
 ## If a publish fails partway
 
@@ -94,6 +97,13 @@ released version is actually broken, **yank it rather than deleting it** — a
 deleted version breaks anyone who already pinned it, while a yanked one stays
 installable for existing pins and invisible to new resolutions. Then release a
 patch version.
+
+## Why `wardhook` publishes last
+
+The meta-package pins each dependency with `==`, so it is only installable once
+all four are on the index. `publish-meta` therefore waits on `publish`. If the
+four succeed and the meta fails, re-running fills in just the meta — the reverse
+order would have published something briefly unresolvable.
 
 ## A note on the build backend
 

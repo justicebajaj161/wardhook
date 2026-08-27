@@ -62,12 +62,20 @@ All four packages are versioned in lockstep while the project is pre-1.0.
   stored in this repository. It re-runs the full gate before building and
   refuses to publish if the tag and the declared versions disagree.
   `scripts/bump-version.sh` sets all eight version declarations at once.
+- **wardhook** — a meta-package containing no code, so `pip install wardhook`
+  brings in all four packages at matching versions. Extras pass through to
+  whichever package owns them (`wardhook[anthropic]`, `[openai]`, `[chroma]`,
+  `[judge]`, `[all]`). It ships no `wardhook/__init__.py`, which would shadow
+  the PEP 420 namespace the four real packages share.
 
 ### Notes
 
 - No package imports another. CI installs each of the four in isolation across
   Python 3.10-3.13 and runs its suite there, so standalone installability is a
-  checked property rather than a claim.
+  checked property rather than a claim. A separate job installs only the
+  `wardhook` meta-package and asserts all four arrive at one version.
+- The meta-package pins the four with `==` and is published after them, so
+  `pip install wardhook` is never briefly unresolvable during a release.
 - The full test suite runs offline against fake models; no API key is required.
 - `AuditLogger` defaults to `record_allows=False`. This is a deliberate
   departure from a literal reading of "log every guardrail action" — an allow is

@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # Set the version across all four packages.
 #
-# The four packages are versioned in lockstep while the project is pre-1.0, and
-# each declares its version in two places: its `pyproject.toml` and the
-# `__version__` in its `__init__.py`. Missing one of the eight is easy and the
-# release workflow will reject the tag, so this does all eight at once.
+# The packages are versioned in lockstep while the project is pre-1.0. Each of
+# the four real ones declares its version twice -- in its `pyproject.toml` and
+# as `__version__` in its `__init__.py` -- and the `wardhook` meta-package
+# declares it once plus pins all four dependencies to it exactly. Missing any
+# one of those eleven is easy, and the release workflow will reject the tag, so
+# this does the lot at once.
 #
 #   ./scripts/bump-version.sh 0.2.0
 
 set -euo pipefail
 
 PACKAGES=(wardhook-core wardhook-guardrails wardhook-observability wardhook-evals)
+META=wardhook
 
 if [ $# -ne 1 ]; then
     echo "usage: $0 <version>    e.g. $0 0.2.0" >&2
@@ -40,6 +43,15 @@ for package in "${PACKAGES[@]}"; do
 
     printf '  %-24s %s\n' "$package" "$version"
 done
+
+# The meta-package has no source, but it pins each of the four to an exact
+# version. Bumping its own version and leaving the pins behind would publish a
+# `wardhook` that installs the previous release.
+meta_pyproject="$root/packages/$META/pyproject.toml"
+[ -f "$meta_pyproject" ] || { echo "error: missing $meta_pyproject" >&2; exit 1; }
+perl -0pi -e "s/^version = \"[^\"]+\"/version = \"$version\"/m unless \$done{'v'}++" "$meta_pyproject"
+perl -pi -e "s/(wardhook-[a-z]+(?:\[[a-z]+\])?)==[^\"]+/\$1==$version/g" "$meta_pyproject"
+printf '  %-24s %s (and its four pins)\n' "$META" "$version"
 
 echo
 echo "Now update CHANGELOG.md, then:"

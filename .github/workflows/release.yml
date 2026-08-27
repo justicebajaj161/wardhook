@@ -66,18 +66,28 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          for package in wardhook-core wardhook-guardrails wardhook-observability wardhook-evals; do
+          for package in wardhook-core wardhook-guardrails wardhook-observability \
+                         wardhook-evals wardhook; do
             declared=$(grep -m1 '^version = ' "packages/$package/pyproject.toml" | cut -d'"' -f2)
             if [ "$declared" != "$tag" ]; then
               echo "::error::$package declares $declared but the tag says $tag"
               exit 1
             fi
           done
-          echo "All four packages declare $tag"
+          # The meta-package pins each dependency exactly. A stale pin would
+          # publish a `wardhook` that installs the previous release.
+          stale=$(grep -oE 'wardhook-[a-z]+(\[[a-z]+\])?==[^"]+' packages/wardhook/pyproject.toml \
+                  | grep -v "==$tag" || true)
+          if [ -n "$stale" ]; then
+            echo "::error::wardhook has pins that are not $tag: $stale"
+            exit 1
+          fi
+          echo "All five packages declare $tag, and the meta pins match"
 
       - name: Build each package into its own directory
         run: |
-          for package in wardhook-core wardhook-guardrails wardhook-observability wardhook-evals; do
+          for package in wardhook-core wardhook-guardrails wardhook-observability \
+                         wardhook-evals wardhook; do
             uv run python -m build --outdir "dist/$package" "packages/$package"
           done
 
@@ -121,5 +131,30 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/${{ matrix.package }}
+          repository-url: ${{ inputs.repository == 'testpypi' && 'https://test.pypi.org/legacy/' || '' }}
+          print-hash: true
+
+  publish-meta:
+    # The `wardhook` meta-package pins the other four to an exact version, so it
+    # must not land on the index before they do -- anyone installing in that
+    # window would get an unresolvable dependency. This is the one ordering
+    # constraint in the release.
+    name: Publish wardhook (meta)
+    runs-on: ubuntu-latest
+    needs: [publish]
+    environment:
+      name: ${{ inputs.repository || 'pypi' }}
+      url: ${{ inputs.repository == 'testpypi' && 'https://test.pypi.org/p/wardhook' || 'https://pypi.org/p/wardhook' }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+      - name: Publish to ${{ inputs.repository || 'pypi' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/wardhook
           repository-url: ${{ inputs.repository == 'testpypi' && 'https://test.pypi.org/legacy/' || '' }}
           print-hash: true
