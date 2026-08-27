@@ -9,6 +9,14 @@ All four packages are versioned in lockstep while the project is pre-1.0.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.0] — 2026-08-27
+
+First release. Four independently installable packages plus a meta-package that
+installs all four. Pre-1.0: the public API may still change, and the packages
+are versioned in lockstep until it settles.
+
 ### Added
 
 - **wardhook-core** — `AgentGraph`, a LangGraph agent runtime that builds only
@@ -86,9 +94,5 @@ All four packages are versioned in lockstep while the project is pre-1.0.
   1.30.0 and 1.32.0 emit `Metadata-Version: 2.5`, which `packaging` rejects, so
   wheels built with them cannot be published.
 
-## [0.1.0] — unreleased
-
-Initial release. Not yet published to PyPI.
-
-[Unreleased]: https://github.com/justicebajaj161/wardhook/compare/main...HEAD
+[Unreleased]: https://github.com/justicebajaj161/wardhook/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/justicebajaj161/wardhook/releases/tag/v0.1.0
