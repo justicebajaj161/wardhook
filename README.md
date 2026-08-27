@@ -154,14 +154,14 @@ No base class, no import, no dependency. Full rationale in
 
 ## Project status
 
-Pre-1.0 and built in the open. Three packages are complete; one is in progress.
+Pre-1.0 and built in the open. All four packages are complete.
 
 | Package | Status | Tests | Coverage |
 | --- | --- | --- | --- |
 | wardhook-core | ✅ Complete | 163 | 92% |
 | wardhook-guardrails | ✅ Complete | 196 | 98% |
 | wardhook-observability | ✅ Complete | 127 | 96% |
-| wardhook-evals | 🚧 In progress | — | — |
+| wardhook-evals | ✅ Complete | 143 | 95% |
 
 Not yet published to PyPI — the badges above are placeholders until the first
 release. Install from source in the meantime:

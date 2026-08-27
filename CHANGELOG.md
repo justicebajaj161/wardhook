@@ -39,6 +39,17 @@ All four packages are versioned in lockstep while the project is pre-1.0.
   durable history, a bounded in-memory ring for long-lived processes, and
   `render_html()` plus a `wardhook-trace` CLI producing a single self-contained
   HTML page that makes no network requests.
+- **wardhook-evals** — A JSONL test-case format with line-numbered parse
+  errors, and `EvalRunner`, which targets anything exposing `.invoke()` rather
+  than any particular agent framework. Ten built-in criteria (`contains`,
+  `not_contains`, `regex`, `equals`, `json_path`, `tool_called`, `blocked`,
+  `max_latency_ms`, `max_cost_usd`, `llm_judge`) in an open registry, with
+  `llm_judge` duck-typing its model so grading never pulls in a model library.
+  Baseline comparison classifying every case `unchanged` / `fixed` /
+  `regressed` / `still_failing` / `added` / `removed`, so a suite carrying known
+  failures still blocks the change that broke something. A `wardhook-eval` CLI
+  with `run`, `compare`, and `validate`; `compare` exits non-zero only on a
+  regression.
 
 ### Notes
 
