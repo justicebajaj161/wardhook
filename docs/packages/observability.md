@@ -42,8 +42,11 @@ This is the subtlest thing in the package, and the easiest bug to ship.
 LangChain reports `input_tokens` as the **sum of all input token types**, with
 cache reads and cache writes already included. The natural-looking formula —
 "total input at the full rate, plus cached tokens at 0.1×" — charges the cached
-tokens twice. On a caching agent, where cache reads are routinely 80–95% of the
-prompt, that inflates the estimate by roughly 10% and does so silently.
+tokens twice, billing them at 1.1× the input rate instead of 0.1×. That is
+eleven times too much for the cached portion, and cache reads are routinely
+80–95% of the prompt on an agent that uses caching at all. On the 90%-cached
+example in `examples/observability_trace.py` it makes the whole estimate 3.3×
+too high, silently.
 
 So the uncached remainder is derived first, and each bucket is priced at its
 own multiplier:

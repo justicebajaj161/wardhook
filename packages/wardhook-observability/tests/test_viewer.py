@@ -20,6 +20,28 @@ from wardhook.observability.viewer.cli import app
 runner = CliRunner()
 
 
+# Typer renders errors through rich: inside a box, wrapped across lines, and --
+# on a CI runner -- with ANSI colour escapes embedded mid-sentence. Asserting on
+# the raw output therefore fails for reasons that have nothing to do with
+# whether the message is right. This flattens all three.
+_ANSI = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def plain(result):
+    """Return CLI output with colour, box drawing, and wrapping removed.
+
+    Args:
+        result: A ``CliRunner`` result.
+
+    Returns:
+        The visible text as one whitespace-normalised line.
+    """
+    text = _ANSI.sub("", result.output)
+    for char in "\u2502\u256d\u256e\u2570\u256f\u2500":
+        text = text.replace(char, " ")
+    return " ".join(text.split())
+
+
 class TestSelfContainment:
     def test_the_page_is_a_complete_document(self, sample_trace):
         page = render_html(sample_trace)
@@ -189,7 +211,7 @@ class TestCli:
         result = runner.invoke(app, ["view", str(source), "-o", str(output)])
 
         assert result.exit_code == 0, result.output
-        assert "no external requests" in result.output
+        assert "no external requests" in plain(result)
         assert output.read_text(encoding="utf-8").startswith("<!doctype html>")
 
     def test_view_can_select_one_run(self, tmp_path, sample_trace):
@@ -200,46 +222,46 @@ class TestCli:
         result = runner.invoke(app, ["view", str(source), "-o", str(output), "--run-id", "run-2"])
 
         assert result.exit_code == 0, result.output
-        assert "1 run" in result.output
+        assert "1 run" in plain(result)
         assert "run-2" in output.read_text(encoding="utf-8")
 
     def test_view_rejects_an_unknown_run_and_lists_what_is_there(self, tmp_path, sample_trace):
         source = self._file(tmp_path, sample_trace)
         result = runner.invoke(app, ["view", str(source), "--run-id", "nope"])
         assert result.exit_code != 0
-        assert "run-1" in result.output
+        assert "run-1" in plain(result)
 
     def test_view_reports_a_missing_file_clearly(self, tmp_path):
         result = runner.invoke(app, ["view", str(tmp_path / "absent.jsonl")])
         assert result.exit_code != 0
-        assert "No trace file" in result.output
+        assert "No trace file" in plain(result)
 
     def test_view_reports_a_corrupt_file_with_its_line_number(self, tmp_path):
         source = tmp_path / "bad.jsonl"
         source.write_text("{nope\n", encoding="utf-8")
         result = runner.invoke(app, ["view", str(source)])
         assert result.exit_code != 0
-        assert "bad.jsonl:1" in result.output
+        assert "bad.jsonl:1" in plain(result)
 
     def test_summary_prints_a_per_node_breakdown(self, tmp_path, sample_trace):
         source = self._file(tmp_path, sample_trace)
         result = runner.invoke(app, ["summary", str(source)])
 
         assert result.exit_code == 0, result.output
-        assert "call_model" in result.output
-        assert "TOTAL" in result.output
+        assert "call_model" in plain(result)
+        assert "TOTAL" in plain(result)
 
     def test_summary_totals_multiple_runs(self, tmp_path, sample_trace):
         source = self._file(tmp_path, sample_trace, sample_trace)
         result = runner.invoke(app, ["summary", str(source)])
-        assert "2 runs" in result.output
+        assert "2 runs" in plain(result)
 
     def test_summary_of_an_empty_file(self, tmp_path):
         source = tmp_path / "empty.jsonl"
         source.write_text("", encoding="utf-8")
         result = runner.invoke(app, ["summary", str(source)])
         assert result.exit_code == 0
-        assert "no runs" in result.output
+        assert "no runs" in plain(result)
 
     def test_the_console_script_entry_point_exists(self):
         from wardhook.observability.viewer.cli import main
@@ -248,4 +270,4 @@ class TestCli:
 
     def test_no_arguments_shows_help(self):
         result = runner.invoke(app, [])
-        assert "Inspect Wardhook trace files" in result.output
+        assert "Inspect Wardhook trace files" in plain(result)

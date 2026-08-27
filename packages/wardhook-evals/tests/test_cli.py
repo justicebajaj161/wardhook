@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from typer.testing import CliRunner
 
@@ -10,16 +11,24 @@ from wardhook.evals.cli import app
 
 runner = CliRunner()
 
+# Typer renders errors through rich: inside a box, wrapped across lines, and --
+# on a CI runner -- with ANSI colour escapes embedded mid-sentence. Asserting on
+# the raw output therefore fails for reasons that have nothing to do with
+# whether the message is right. This flattens all three.
+_ANSI = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
 
 def plain(result):
-    """Flatten CLI output for assertions.
+    """Return CLI output with colour, box drawing, and wrapping removed.
 
-    Typer renders errors inside a rich box, wrapping long messages across
-    lines. Asserting on the raw output makes a test fail whenever a message
-    changes length, which has nothing to do with whether it is correct.
+    Args:
+        result: A ``CliRunner`` result.
+
+    Returns:
+        The visible text as one whitespace-normalised line.
     """
-    text = result.output
-    for char in "│╭╮╰╯─":
+    text = _ANSI.sub("", result.output)
+    for char in "\u2502\u256d\u256e\u2570\u256f\u2500":
         text = text.replace(char, " ")
     return " ".join(text.split())
 

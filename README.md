@@ -6,6 +6,12 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![Checked with mypy](https://img.shields.io/badge/mypy-checked-2a6db2.svg)](https://mypy-lang.org)
+
+[![PyPI core](https://img.shields.io/pypi/v/wardhook-core?label=wardhook-core)](https://pypi.org/project/wardhook-core/)
+[![PyPI guardrails](https://img.shields.io/pypi/v/wardhook-guardrails?label=wardhook-guardrails)](https://pypi.org/project/wardhook-guardrails/)
+[![PyPI observability](https://img.shields.io/pypi/v/wardhook-observability?label=wardhook-observability)](https://pypi.org/project/wardhook-observability/)
+[![PyPI evals](https://img.shields.io/pypi/v/wardhook-evals?label=wardhook-evals)](https://pypi.org/project/wardhook-evals/)
 
 ---
 
@@ -163,8 +169,11 @@ Pre-1.0 and built in the open. All four packages are complete.
 | wardhook-observability | ✅ Complete | 127 | 96% |
 | wardhook-evals | ✅ Complete | 143 | 95% |
 
-Not yet published to PyPI — the badges above are placeholders until the first
-release. Install from source in the meantime:
+Not yet published to PyPI, so the four version badges above will read "not
+found" until the first release; everything else in this repository works today.
+Publishing runs through [PyPI Trusted Publishing](docs/releasing.md) on a
+version tag — there is no API token stored anywhere here. Install from source in
+the meantime:
 
 ```bash
 git clone https://github.com/justicebajaj161/wardhook.git
@@ -192,6 +201,9 @@ needed to contribute, and no test touches the network.
   [guardrails](docs/packages/guardrails.md) ·
   [observability](docs/packages/observability.md) ·
   [evals](docs/packages/evals.md)
+- [Releasing](docs/releasing.md) — how versions are cut and published
+- [`examples/`](examples) — one runnable script per package plus a combined one,
+  all offline, none needing an API key
 
 ## A note on what guardrails can and cannot do
 

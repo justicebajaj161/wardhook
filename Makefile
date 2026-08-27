@@ -37,13 +37,22 @@ test-cov: ## Run tests with a coverage report
 	uv run pytest --cov --cov-report=term-missing
 
 solo: ## Prove each package installs and passes its tests entirely on its own
+	# Deliberately mirrors the `test` job in .github/workflows/ci.yml exactly:
+	# the same extra packages, the same `-c /dev/null` (so the root pytest
+	# config is NOT inherited), and the same sibling-leak assertion. Any drift
+	# between the two means a failure only CI can see -- which has happened.
 	@set -e; for p in $(PACKAGES); do \
 		echo "==> standalone install: $$p"; \
 		rm -rf .venv-solo; \
 		uv venv --quiet .venv-solo; \
-		VIRTUAL_ENV=.venv-solo uv pip install --quiet -e packages/$$p pytest; \
-		VIRTUAL_ENV=.venv-solo uv run --no-project --active \
-			pytest packages/$$p/tests -q -p no:cacheprovider; \
+		VIRTUAL_ENV=.venv-solo uv pip install --quiet -e packages/$$p pytest pytest-cov httpx; \
+		here=$${p#wardhook-}; \
+		.venv-solo/bin/python -c "import sys; \
+			siblings = {'core','guardrails','observability','evals'} - {'$$here'}; \
+			leaked = [n for n in sorted(siblings) if __import__('importlib.util', fromlist=['x']).find_spec('wardhook.'+n)]; \
+			sys.exit('FAIL: %s importable in a solo install' % leaked) if leaked else None"; \
+		FORCE_COLOR=1 COLUMNS=80 .venv-solo/bin/python -m pytest packages/$$p/tests \
+			-q -p no:cacheprovider --import-mode=importlib -c /dev/null; \
 	done; \
 	rm -rf .venv-solo; \
 	echo "==> all four packages are independently installable"

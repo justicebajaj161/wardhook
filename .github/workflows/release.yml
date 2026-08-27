@@ -1,0 +1,123 @@
+name: Release
+
+# Publishes all four packages to PyPI when a version tag is pushed.
+#
+# This workflow does nothing until two things are true:
+#   1. Someone pushes a tag matching v*, e.g. `git tag v0.1.0 && git push --tags`.
+#   2. Each project has a Trusted Publisher configured on PyPI pointing at this
+#      repository and this workflow file.
+#
+# It uses Trusted Publishing (OIDC) rather than a long-lived API token, so there
+# is no secret to store, leak, or rotate. See docs/releasing.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Where to publish"
+        required: true
+        default: testpypi
+        type: choice
+        options: [testpypi, pypi]
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.9.7"
+
+jobs:
+  verify:
+    # A tag is not a promise that the tree was green. Re-run the gate here so a
+    # release can never ship code that does not pass its own tests.
+    name: Verify before release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen || uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - name: Type-check every package independently
+        run: |
+          for package in wardhook-core wardhook-guardrails wardhook-observability wardhook-evals; do
+            uv run mypy "packages/$package/src"
+          done
+      - run: uv run pytest -q
+
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    needs: [verify]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen || uv sync
+
+      - name: Confirm the tag matches the package versions
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for package in wardhook-core wardhook-guardrails wardhook-observability wardhook-evals; do
+            declared=$(grep -m1 '^version = ' "packages/$package/pyproject.toml" | cut -d'"' -f2)
+            if [ "$declared" != "$tag" ]; then
+              echo "::error::$package declares $declared but the tag says $tag"
+              exit 1
+            fi
+          done
+          echo "All four packages declare $tag"
+
+      - name: Build each package into its own directory
+        run: |
+          for package in wardhook-core wardhook-guardrails wardhook-observability wardhook-evals; do
+            uv run python -m build --outdir "dist/$package" "packages/$package"
+          done
+
+      - name: Validate the metadata
+        run: uv run twine check dist/*/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+  publish:
+    name: Publish ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    needs: [build]
+    strategy:
+      # Never cancel a sibling mid-upload: a partial release is worse than a
+      # failed one, and a re-run must be able to fill in only what is missing.
+      fail-fast: false
+      matrix:
+        package:
+          - wardhook-core
+          - wardhook-guardrails
+          - wardhook-observability
+          - wardhook-evals
+    environment:
+      name: ${{ inputs.repository || 'pypi' }}
+      url: https://pypi.org/p/${{ matrix.package }}
+    permissions:
+      # Required for Trusted Publishing. This is the only credential involved;
+      # there is no API token anywhere in this repository.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+      - name: Publish to ${{ inputs.repository || 'pypi' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/${{ matrix.package }}
+          repository-url: ${{ inputs.repository == 'testpypi' && 'https://test.pypi.org/legacy/' || '' }}
+          print-hash: true

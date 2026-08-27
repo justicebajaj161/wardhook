@@ -50,15 +50,37 @@ All four packages are versioned in lockstep while the project is pre-1.0.
   failures still blocks the change that broke something. A `wardhook-eval` CLI
   with `run`, `compare`, and `validate`; `compare` exits non-zero only on a
   regression.
+- **Docs** — an [architecture overview](docs/architecture.md) explaining the
+  structural-typing seam, a [quickstart](docs/quickstart.md) building one agent
+  from all four packages, a design-decisions page per package, and
+  [releasing](docs/releasing.md).
+- **Examples** — one runnable script per package plus `combined_agent.py` using
+  all four, with shared fixtures in `examples/data/`. Every example runs offline
+  against a fake model and needs no API key; CI executes all five on each push.
+- **Release tooling** — `.github/workflows/release.yml` publishes all four
+  packages to PyPI on a version tag using Trusted Publishing, so no API token is
+  stored in this repository. It re-runs the full gate before building and
+  refuses to publish if the tag and the declared versions disagree.
+  `scripts/bump-version.sh` sets all eight version declarations at once.
 
 ### Notes
 
-- Neither published package imports another. CI installs each in isolation and
-  runs its suite there, so standalone installability is a checked property.
+- No package imports another. CI installs each of the four in isolation across
+  Python 3.10-3.13 and runs its suite there, so standalone installability is a
+  checked property rather than a claim.
 - The full test suite runs offline against fake models; no API key is required.
+- `AuditLogger` defaults to `record_allows=False`. This is a deliberate
+  departure from a literal reading of "log every guardrail action" — an allow is
+  the overwhelmingly common outcome, and logging every one buries what a
+  reviewer opened the file to find. The behaviour is one constructor argument
+  either way, and the reasoning is on the README and in the design doc.
+- The build backend is pinned to `hatchling>=1.27,!=1.30.*,<1.32`: hatchling
+  1.30.0 and 1.32.0 emit `Metadata-Version: 2.5`, which `packaging` rejects, so
+  wheels built with them cannot be published.
 
 ## [0.1.0] — unreleased
 
 Initial release. Not yet published to PyPI.
 
 [Unreleased]: https://github.com/justicebajaj161/wardhook/compare/main...HEAD
+[0.1.0]: https://github.com/justicebajaj161/wardhook/releases/tag/v0.1.0
