@@ -45,6 +45,21 @@ CI installs each package in an isolated environment with no siblings present and
 runs its full suite there. If a package ever reaches for one of the others, the
 build fails.
 
+### Why not LangSmith, Langfuse, Presidio or NeMo Guardrails?
+
+Because of two constraints those tools do not meet, and which this project is
+built around. **`wardhook-guardrails` depends on PyYAML and nothing else** —
+Presidio pulls spaCy plus its models, hundreds of megabytes, which is the
+difference between fitting in a Lambda or an air-gapped container and not.
+**Nothing leaves your machine** — LangSmith and Langfuse both want your traces
+on their infrastructure, and the local dashboard above is the alternative to a
+hosted console rather than a route to one.
+
+If neither constraint binds for you, those tools are more mature and you should
+probably use them. The honest scope of this one is: *PII redaction and cost
+visibility in a LangGraph agent, offline, without pulling 300MB of ML
+dependencies.*
+
 ## Install
 
 Take one:
@@ -289,6 +304,32 @@ evidence a reviewer needs — not a guarantee, and not a substitute for limiting
 what the agent can reach in the first place. That position is argued in full in
 [the guardrails design doc](docs/packages/guardrails.md#limitations) rather than
 buried.
+
+### It has been measured, and the number is published
+
+| | |
+|---|---|
+| Recall — labelled span covered by some rule | **84.3%** |
+| Precision — detection landed on real PII | **94.2%** |
+| Corpus | 2,076 labelled spans across 760 documents, all four packs |
+
+Full tables, the method, and what these figures do *not* support are in
+[`benchmarks/pii/`](benchmarks/pii). Reproduce with `make bench-pii`.
+
+The corpus is generated from real-world identifier formats rather than from
+Wardhook's own patterns — a corpus built out of the regexes under test would
+score near 1.0 and measure nothing. It includes the written variants a pattern
+may not anticipate, and 160 clean documents full of near-misses that must be
+left alone.
+
+**The number is published whatever it says**, and this one names specific
+weaknesses: `DATE_OF_BIRTH` sits at 37% because the pattern matches
+`DD/MM/YYYY` and not `1982-03-14`; `US_SSN` at 53% because it requires the
+dashes; `SWIFT_BIC` over-redacts capitalised words near "wire". Those are
+reproducible and fixable, and the figure was published before anything was
+tuned so the next one can be compared against something nobody had an incentive
+to flatter. A documented 84% you can check beats an undocumented claim you
+cannot.
 
 ### Audit logging records blocks and redactions, not allows
 

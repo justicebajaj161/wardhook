@@ -53,6 +53,14 @@ All four packages are versioned in lockstep while the project is pre-1.0.
   Every interpolated value is escaped — tool and guardrail names come from user
   code, and this page really is served over HTTP.
 
+- **A measured PII benchmark**, in [`benchmarks/pii/`](benchmarks/pii), with
+  `make bench-pii` to reproduce it. 84.3% recall and 94.2% precision over 2,076
+  labelled spans in 760 documents across all four packs. The corpus is generated
+  from real-world identifier formats rather than from the project's own regexes,
+  and is committed so a reader can inspect exactly what was measured. Until now
+  the answer to "what is the false-negative rate" was that nobody had measured
+  it.
+
 ### Notes
 
 - **The dashboard serves telemetry and configuration only, never content.** No
@@ -62,6 +70,16 @@ All four packages are versioned in lockstep while the project is pre-1.0.
   test pinning that. `run_id` is carried on every run and every step, and it is
   the intended join key back to your own audit log, where your redaction and
   retention policy already apply.
+- **The benchmark number is published whatever it says, and nothing was tuned
+  first.** It names specific weaknesses — `DATE_OF_BIRTH` at 37% because the
+  pattern matches `DD/MM/YYYY` and not `1982-03-14`, `US_SSN` at 53% because it
+  requires its dashes, `SWIFT_BIC` over-redacting capitalised words near "wire".
+  Those are now in `docs/packages/guardrails.md` under Limitations with their
+  figures. Fixing them is separate work, deliberately: the next result can be
+  compared against a figure nobody had an incentive to flatter.
+- **`make bench-pii` is not part of `make check`.** A benchmark is evidence to
+  publish, not a gate to pass; wiring it into CI would create pressure to make
+  the number go up, which is how a measurement stops being trustworthy.
 - **The telemetry sink is read structurally, and both shapes are supported.**
   `Tracer` lists with `traces()`; `JSONLTraceStore` lists with `read()`. The API
   reports which one it found as a `mode`, because an in-memory tracer under

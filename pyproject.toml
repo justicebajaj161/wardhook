@@ -82,6 +82,7 @@ convention = "google"
 # over docstring ceremony.
 "**/tests/**" = ["D100", "D101", "D102", "D103", "D104", "ARG001", "ARG002"]
 "examples/**" = ["D100", "D103", "T201"]
+"benchmarks/**" = ["D100", "D103", "T201"]
 "tests/**" = ["D100", "D101", "D102", "D103", "D104"]
 
 [tool.ruff.lint.flake8-tidy-imports]

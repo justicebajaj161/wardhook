@@ -146,12 +146,25 @@ Value-based limits are a different control and belong in the tool itself.
 ## Limitations
 
 Stated plainly, because a security control that oversells itself is worse than
-one that does not exist.
+one that does not exist. **They are also measured**: the entity rules score
+84.3% recall and 94.2% precision against a labelled corpus of 2,076 spans, and
+[`benchmarks/pii/`](../../benchmarks/pii) has the per-entity tables, the method,
+and what the figures do not support. Where a limitation below has a number
+attached, it comes from there rather than from an impression.
 
 - **Regex misses things an ML model would catch.** Names, addresses in
   unfamiliar formats, and PII phrased unusually or split across a sentence will
   slip through. The dependency-weight trade is deliberate; if you need NER,
   wrap one in the `BaseGuardrail` interface and add it to the list.
+- **One identifier, several written forms, one pattern.** This is the largest
+  measured weakness and it is systematic rather than incidental. `DATE_OF_BIRTH`
+  matches `DD/MM/YYYY` and `DD-MM-YYYY`, so ISO and long-hand dates are missed
+  (37% recall). `US_SSN` requires its dashes (53%). `IBAN` misses the spaced
+  form banks print (49%), `UK_SORT_CODE` the space-separated form (54%), and
+  `MEDICARE_ID` the grouped form on the card itself (43%).
+- **A pattern with a context word can over-redact.** `SWIFT_BIC` fires on
+  ordinary capitalised words near "wire" or "transfer" (38% precision), and
+  `IP_ADDRESS` on dotted version strings such as `10.2.14.3` (70%).
 - **Injection detection is heuristic.** A novel attack in plain prose scores
   zero. Do not treat the score as a boundary you can rely on alone — reducing
   what the agent can *reach* matters more than detecting what it is *told*.

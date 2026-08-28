@@ -12,7 +12,7 @@ ALL_PACKAGES := $(PACKAGES) wardhook
 PY ?= python3
 
 .DEFAULT_GOAL := help
-.PHONY: help install lint fmt types test test-cov cov-table solo meta build clean check
+.PHONY: help install lint fmt types test test-cov cov-table solo meta build clean check bench-pii
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -45,6 +45,12 @@ test-cov: ## Run tests with a coverage report, failing under the threshold
 
 cov-table: ## Print the README's status table from a real coverage run
 	@./scripts/coverage-table.sh
+
+bench-pii: ## Measure PII detection against the labelled corpus and update results.md
+	# Deliberately not part of `check`. A benchmark is evidence to publish, not
+	# a gate to pass -- wiring it into CI would create pressure to make the
+	# number go up, which is exactly how a measurement stops being trustworthy.
+	uv run $(PY) benchmarks/pii/run.py --write
 
 solo: ## Prove each package installs and passes its tests entirely on its own
 	# Deliberately mirrors the `test` job in .github/workflows/ci.yml exactly:
