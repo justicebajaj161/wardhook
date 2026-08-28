@@ -19,7 +19,14 @@ from langchain_core.messages import AIMessage
 from wardhook.core.agent import AgentGraph
 from wardhook.core.rag.retriever import Retriever
 from wardhook.core.serve.dashboard import create_dashboard
-from wardhook.core.serve.topology import read_topology
+from wardhook.core.serve.topology import (
+    Topology,
+    TopologyEdge,
+    TopologyNode,
+    layout,
+    read_topology,
+    render_svg,
+)
 
 
 class Allower:
@@ -597,3 +604,154 @@ class TestPageEscaping:
         page = TestClient(create_dashboard(agent)).get("/").text
         assert "<img onerror" not in page
         assert "&lt;img onerror=alert(1)&gt;" in page
+
+
+class TestLayout:
+    def test_ranks_follow_the_longest_path(self, full_agent):
+        placed = layout(read_topology(full_agent))
+        rank = {box.key: box.rank for box in placed.boxes}
+        assert rank["__start__"] == 0
+        assert rank["guard_input"] < rank["retrieve"] < rank["call_model"]
+        assert rank["call_model"] < rank["tools"]
+        assert rank["__end__"] == max(rank.values())
+
+    def test_the_tool_loop_is_recognised_as_a_back_edge(self, full_agent):
+        # Without this the ranking would not terminate on a sensible answer:
+        # tools would have to sit both above and below call_model.
+        topology = read_topology(full_agent)
+        placed = layout(topology)
+        looped = {(topology.edges[i].source, topology.edges[i].target) for i in placed.back_edges}
+        assert looped == {("tools", "call_model")}
+
+    def test_nodes_sharing_a_rank_are_placed_side_by_side(self, full_agent):
+        placed = layout(read_topology(full_agent))
+        by_rank = {}
+        for box in placed.boxes:
+            by_rank.setdefault(box.rank, []).append(box)
+        siblings = next(row for row in by_rank.values() if len(row) > 1)
+        assert len({box.x for box in siblings}) == len(siblings)
+        assert len({box.y for box in siblings}) == 1
+
+    def test_an_empty_topology_lays_out_to_nothing(self):
+        placed = layout(Topology(available=False, reason="no graph"))
+        assert placed.boxes == ()
+        assert (placed.width, placed.height) == (0.0, 0.0)
+
+    def test_a_node_unreachable_from_the_start_is_still_placed(self):
+        # A hand-built graph can have one. Dropping it silently would make the
+        # picture a lie; this is the only kind of error a diagram can tell.
+        nodes = (TopologyNode("a", "a"), TopologyNode("b", "b"), TopologyNode("orphan", "orphan"))
+        placed = layout(Topology(nodes=nodes, edges=(TopologyEdge("a", "b"),)))
+        assert {box.key for box in placed.boxes} == {"a", "b", "orphan"}
+
+    def test_an_edge_naming_a_node_that_does_not_exist_is_ignored(self):
+        nodes = (TopologyNode("a", "a"),)
+        placed = layout(Topology(nodes=nodes, edges=(TopologyEdge("a", "ghost"),)))
+        assert placed.box("a") is not None
+        assert placed.box("ghost") is None
+
+    def test_an_edge_leaving_a_node_that_does_not_exist_is_ignored(self):
+        # The mirror of the case above. Both halves of an edge are checked,
+        # because a hand-built graph can dangle at either end.
+        nodes = (TopologyNode("a", "a"),)
+        placed = layout(Topology(nodes=nodes, edges=(TopologyEdge("ghost", "a"),)))
+        assert {box.key for box in placed.boxes} == {"a"}
+        assert placed.back_edges == frozenset()
+
+    def test_the_same_configuration_always_lays_out_identically(self, full_agent):
+        # A diagram that moves between refreshes is one a reader cannot learn.
+        first, second = layout(read_topology(full_agent)), layout(read_topology(full_agent))
+        assert first == second
+
+
+class TestRenderSvg:
+    def test_every_node_is_addressable_by_name(self, full_agent):
+        svg = render_svg(read_topology(full_agent))
+        for node in read_topology(full_agent).nodes:
+            assert f'data-node="{node.key}"' in svg
+            assert f'data-metric-for="{node.key}"' in svg
+
+    def test_a_conditional_edge_is_drawn_differently(self, full_agent):
+        svg = render_svg(read_topology(full_agent))
+        assert 'class="edge conditional"' in svg
+        assert 'class="edge"' in svg
+        assert ">blocked<" in svg
+
+    def test_the_terminals_are_drawn_differently_from_the_work(self, full_agent):
+        svg = render_svg(read_topology(full_agent))
+        assert 'class="node terminal" data-node="__start__"' in svg
+        assert 'class="node" data-node="call_model"' in svg
+
+    def test_nothing_is_drawn_for_an_agent_with_no_graph(self):
+        # No invented picture. The page says why instead.
+        assert render_svg(read_topology(Minimal())) == ""
+
+    def test_an_edge_to_a_missing_node_is_skipped_not_crashed_on(self):
+        nodes = (TopologyNode("a", "a"),)
+        svg = render_svg(Topology(nodes=nodes, edges=(TopologyEdge("a", "ghost"),)))
+        assert "ghost" not in svg
+        assert 'data-node="a"' in svg
+
+    def test_a_back_edge_into_the_first_rank_stays_on_the_canvas(self):
+        # The clamp that keeps a detour above the top rank from being drawn off
+        # the top of the viewBox.
+        nodes = (TopologyNode("a", "a"), TopologyNode("b", "b"))
+        edges = (TopologyEdge("a", "b"), TopologyEdge("b", "a"))
+        svg = render_svg(Topology(nodes=nodes, edges=edges))
+        coordinates = [float(v) for v in re.findall(r"[ML](-?[\d.]+),(-?[\d.]+)", svg) for v in v]
+        assert min(coordinates) >= 0, "a path leaves the canvas"
+
+    def test_a_node_named_like_markup_is_inert_everywhere_it_appears(self):
+        # A node name reaches four places: the aria-label, the data-node
+        # attribute, the visible text, and the metric hook. Every one is
+        # escaped, and the count is asserted so adding a fifth without escaping
+        # it fails here rather than in someone's browser.
+        nasty = "<script>x</script>"
+        svg = render_svg(Topology(nodes=(TopologyNode(nasty, nasty),)))
+        assert "<script>" not in svg
+        assert svg.count("&lt;script&gt;x&lt;/script&gt;") == 4
+
+    def test_an_edge_label_like_markup_is_inert(self):
+        nodes = (TopologyNode("a", "a"), TopologyNode("b", "b"))
+        edges = (TopologyEdge("a", "b", label="<b>x</b>", conditional=True),)
+        svg = render_svg(Topology(nodes=nodes, edges=edges))
+        assert "<b>x</b>" not in svg
+        assert "&lt;b&gt;x&lt;/b&gt;" in svg
+
+
+class TestTopologyOnThePage:
+    def test_an_unconfigured_agent_draws_strictly_fewer_boxes(self, bare_agent, full_agent):
+        # The claim this whole view exists to make: the picture is accurate to
+        # the configuration, not to a template that hides unused parts.
+        client_full = TestClient(create_dashboard(full_agent))
+        client_bare = TestClient(create_dashboard(bare_agent))
+
+        full_nodes = [n["id"] for n in client_full.get("/api/topology").json()["nodes"]]
+        bare_nodes = [n["id"] for n in client_bare.get("/api/topology").json()["nodes"]]
+        assert set(bare_nodes) < set(full_nodes)
+        assert "retrieve" not in bare_nodes
+        assert "tools" not in bare_nodes
+
+        drawn_full = re.findall(r'data-node="([^"]+)"', client_full.get("/").text)
+        drawn_bare = re.findall(r'data-node="([^"]+)"', client_bare.get("/").text)
+        assert sorted(drawn_full) == sorted(full_nodes)
+        assert sorted(drawn_bare) == sorted(bare_nodes)
+        assert len(drawn_bare) < len(drawn_full)
+
+    def test_the_page_says_how_many_nodes_and_edges_it_drew(self, bare_agent):
+        assert "3 nodes, 2 edges" in TestClient(create_dashboard(bare_agent)).get("/").text
+
+    def test_an_agent_with_no_graph_gets_the_reason_instead_of_a_diagram(self):
+        page = TestClient(create_dashboard(Minimal())).get("/").text
+        assert "<svg" not in page
+        assert "no .graph attribute" in page
+
+    def test_the_diagram_adds_no_external_resource(self, full_agent):
+        # Re-asserted with the SVG present, because this is the step where a
+        # vendored renderer would have been pulled in from a CDN.
+        page = TestClient(create_dashboard(full_agent)).get("/").text
+        assert "<svg" in page
+        external = re.findall(r'(?:src|href)\s*=\s*["\'](?!#)([^"\']+)', page)
+        assert external == []
+        for scheme in ("http://", "https://", "//cdn", "@import"):
+            assert scheme not in page

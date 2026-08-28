@@ -21,6 +21,13 @@ All four packages are versioned in lockstep while the project is pre-1.0.
   `TopologyNode` and `TopologyEdge` records it returns. Anything without a
   graph — a plain callable with `.invoke()` is a supported target — reports
   `available=False` with a reason rather than raising.
+- **The topology view.** The page draws the agent's graph as inline SVG,
+  rendered server-side in pure Python: ranks by longest path, conditional edges
+  dashed and labelled, and edges that loop back or skip a rank routed through
+  the empty gutters rather than across a node box. No renderer is vendored and
+  none is fetched, so the page stays a few kilobytes and keeps working offline.
+  `draw_mermaid()` source is still published on `/api/topology` for anyone who
+  would rather render it somewhere else.
 - **A self-contained dashboard page** at the dashboard's mount root. One HTML
   document with its CSS inlined: no CDN, no web font, no image request, so it
   behaves identically in an air-gapped network. It names the agent, lists its

@@ -50,7 +50,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from wardhook.core.serve.app import _describe
-from wardhook.core.serve.topology import read_topology
+from wardhook.core.serve.topology import read_topology, render_svg
 
 __all__ = ["create_dashboard"]
 
@@ -143,6 +143,23 @@ h2 { font-size: .95rem; margin: 0 0 .75rem; letter-spacing: -.005em; }
   padding: .08rem .55rem; margin: 0 .3rem .3rem 0; font-size: .8rem; background: var(--bg);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+.scroll { overflow-x: auto; }
+.topology { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+.topology .box { fill: var(--bg); stroke: var(--line); stroke-width: 1.5; }
+.topology .terminal .box { fill: var(--panel); stroke-dasharray: 3 3; }
+.topology .label {
+  fill: var(--fg); font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.topology .metric {
+  fill: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.topology .edge { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: .75; }
+.topology .edge.conditional { stroke-dasharray: 5 4; }
+.topology .arrow { fill: var(--muted); opacity: .75; }
+.topology .edge-label {
+  fill: var(--muted); font: 10px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.legend { color: var(--muted); font-size: .78rem; margin: .9rem 0 0; }
 .off { color: var(--muted); }
 .empty {
   color: var(--muted); padding: 1.5rem; text-align: center;
@@ -389,6 +406,19 @@ def _render_page(agent: Any, sink: Any) -> str:
         f"<dt>telemetry</dt><dd>{_enabled(described['telemetry_enabled'])}</dd>"
     )
 
+    topology = read_topology(agent)
+    diagram = render_svg(topology)
+    if diagram:
+        picture = (
+            f'<div class="scroll">{diagram}</div>'
+            f'<p class="legend">{len(topology.nodes)} nodes, {len(topology.edges)} edges. '
+            f"A dashed edge is conditional: a router decides at run time whether it is "
+            f"taken. This is the graph this agent actually compiled, so a feature it "
+            f"is not configured for has no box here.</p>"
+        )
+    else:
+        picture = f'<div class="empty">{escape(topology.reason or "No graph to draw.")}</div>'
+
     return (
         "<!doctype html>\n"
         '<html lang="en"><head><meta charset="utf-8">'
@@ -399,6 +429,7 @@ def _render_page(agent: Any, sink: Any) -> str:
         f'<div class="sub">Structure and cost of this agent. '
         f"No prompts, no responses, no retrieved text.</div>"
         f'<div class="banner {escape(mode)}">{escape(_MODE_NOTES[mode])}</div>'
+        f'<section class="card"><h2>Topology</h2>{picture}</section>'
         f'<section class="card"><h2>Configuration</h2>'
         f'<dl class="facts">{facts}</dl></section>'
         f"<footer>Served by wardhook-core. This page shows telemetry and "
