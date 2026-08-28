@@ -755,3 +755,120 @@ class TestTopologyOnThePage:
         assert external == []
         for scheme in ("http://", "https://", "//cdn", "@import"):
             assert scheme not in page
+
+
+class TestTraceOverlay:
+    def test_the_run_picker_appears_only_when_there_is_telemetry_to_pick_from(self, bare_agent):
+        with_sink = TestClient(create_dashboard(bare_agent, telemetry=MemorySink())).get("/").text
+        without = TestClient(create_dashboard(bare_agent)).get("/").text
+        assert 'id="wh-run"' in with_sink
+        assert 'id="wh-run"' not in without
+
+    def test_the_script_ships_only_when_it_has_something_to_drive(self, bare_agent):
+        with_sink = TestClient(create_dashboard(bare_agent, telemetry=MemorySink())).get("/").text
+        without = TestClient(create_dashboard(bare_agent)).get("/").text
+        assert with_sink.count("<script>") == 1
+        assert "<script" not in without
+
+    def test_the_run_id_field_is_present_and_copyable(self, bare_agent):
+        # run_id is the documented way back to the caller's own audit log. It is
+        # the reason the dashboard does not need a copy of the content, so it
+        # has to be visible and easy to lift off the page.
+        page = TestClient(create_dashboard(bare_agent, telemetry=MemorySink())).get("/").text
+        assert 'id="wh-runid" readonly' in page
+        assert 'id="wh-copy"' in page
+        assert "run_id" in page
+
+    def test_the_overlay_script_never_assigns_markup(self, bare_agent):
+        # The invariant that makes it safe for the page to render values the API
+        # returned: the script sets attributes and textContent, and builds nodes
+        # with createElement. Nothing it touches can interpret a string as HTML.
+        page = TestClient(create_dashboard(bare_agent, telemetry=MemorySink())).get("/").text
+        for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"):
+            assert forbidden not in page
+
+    def test_the_script_adds_no_external_resource(self, full_agent):
+        sink = MemorySink(trace("run-1", steps=[step("call_model")]))
+        page = TestClient(create_dashboard(full_agent, telemetry=sink)).get("/").text
+        assert "<script>" in page
+        external = re.findall(r'(?:src|href)\s*=\s*["\'](?!#)([^"\']+)', page)
+        assert external == []
+        for scheme in ("http://", "https://", "//cdn", "@import"):
+            assert scheme not in page
+
+    def test_every_node_the_overlay_can_paint_is_on_the_diagram(self, full_agent):
+        # The join the overlay depends on, asserted on the server side where the
+        # coverage gate can see it: a node key in the topology is exactly what a
+        # step's node name has to match.
+        client = TestClient(create_dashboard(full_agent))
+        drawn = set(re.findall(r'data-metric-for="([^"]+)"', client.get("/").text))
+        assert drawn == {node["id"] for node in client.get("/api/topology").json()["nodes"]}
+
+    def test_a_step_carries_the_metrics_of_its_node(self, full_agent):
+        # The payoff, stated as data: this node, in this run, cost this much.
+        sink = MemorySink(
+            trace(
+                "run-1",
+                steps=[
+                    step("guard_input", latency_ms=4.0),
+                    step(
+                        "call_model",
+                        latency_ms=412.5,
+                        usage=usage(900, 120, 400),
+                        cost=0.0057,
+                        model="claude-opus-5",
+                    ),
+                ],
+            )
+        )
+        client = TestClient(create_dashboard(full_agent, telemetry=sink))
+        run = client.get("/api/runs/run-1").json()
+        drawn = set(re.findall(r'data-metric-for="([^"]+)"', client.get("/").text))
+
+        by_node = {s["node"]: s for s in run["steps"]}
+        assert set(by_node) <= drawn, "a recorded node has no box to paint"
+        assert by_node["call_model"]["cost"] == 0.0057
+        assert by_node["call_model"]["tokens_in"] == 900
+        assert by_node["call_model"]["latency_ms"] == 412.5
+        assert by_node["guard_input"]["tokens_in"] == 0
+
+    def test_an_unattributed_step_is_reported_rather_than_dropped(self, full_agent):
+        # wardhook-observability parks usage that arrived while no node was open
+        # on a synthetic "(ungrouped)" step. It has no box, and the overlay lists
+        # it separately -- a cost you cannot attribute is still a cost you paid.
+        sink = MemorySink(
+            trace(
+                "run-1",
+                steps=[
+                    step("call_model", cost=0.001),
+                    step("(ungrouped)", latency_ms=0.0, usage=usage(300, 0), cost=0.0021),
+                ],
+            )
+        )
+        client = TestClient(create_dashboard(full_agent, telemetry=sink))
+        nodes = [s["node"] for s in client.get("/api/runs/run-1").json()["steps"]]
+        drawn = set(re.findall(r'data-metric-for="([^"]+)"', client.get("/").text))
+
+        assert "(ungrouped)" in nodes
+        assert "(ungrouped)" not in drawn
+        assert client.get("/api/runs/run-1").json()["totals"]["cost"] == 0.0031
+
+    def test_a_node_visited_twice_is_reported_twice_and_totals_agree(self, full_agent):
+        # The tool loop returns to call_model on every round trip. Both visits
+        # are in the trace and the run's totals include both, so the overlay has
+        # to add them up rather than show the last one -- which is what it does.
+        sink = MemorySink(
+            trace(
+                "run-1",
+                steps=[
+                    step("call_model", latency_ms=10.0, usage=usage(4200, 180), cost=0.0084),
+                    step("tools", latency_ms=22.0),
+                    step("call_model", latency_ms=8.0, usage=usage(4200, 180), cost=0.0084),
+                ],
+            )
+        )
+        run = TestClient(create_dashboard(full_agent, telemetry=sink)).get("/api/runs/run-1").json()
+        visits = [s for s in run["steps"] if s["node"] == "call_model"]
+        assert len(visits) == 2
+        assert sum(s["tokens_in"] for s in visits) == run["totals"]["tokens_in"]
+        assert sum(s["cost"] for s in visits) == run["totals"]["cost"]

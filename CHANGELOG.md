@@ -21,6 +21,15 @@ All four packages are versioned in lockstep while the project is pre-1.0.
   `TopologyNode` and `TopologyEdge` records it returns. Anything without a
   graph — a plain callable with `.invoke()` is a supported target — reports
   `available=False` with a reason rather than raising.
+- **The trace overlay.** Picking a run shades each node by how long it took and
+  writes its tokens and cost underneath, so the architecture diagram and the
+  bill are one picture. A node visited more than once — `call_model` on every
+  tool round trip — is totalled rather than overwritten, so what a box says
+  reconciles with the run's own totals. Steps with no box, such as the tracer's
+  synthetic `(ungrouped)`, are listed rather than dropped.
+- **`run_id` is shown prominently and is copyable,** because it is the join key
+  back to your own audit log. That is the reason the dashboard does not need,
+  and does not have, a second copy of the content.
 - **The topology view.** The page draws the agent's graph as inline SVG,
   rendered server-side in pure Python: ranks by longest path, conditional edges
   dashed and labelled, and edges that loop back or skip a rank routed through

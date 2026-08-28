@@ -160,6 +160,37 @@ h2 { font-size: .95rem; margin: 0 0 .75rem; letter-spacing: -.005em; }
   fill: var(--muted); font: 10px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 .legend { color: var(--muted); font-size: .78rem; margin: .9rem 0 0; }
+.runbar { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-bottom: .9rem; }
+.runbar label {
+  color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+}
+select, button {
+  font: inherit; font-size: .85rem; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: .28rem .6rem;
+}
+button { cursor: pointer; }
+button:hover { background: var(--panel); }
+select { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 22rem; }
+#wh-status { color: var(--muted); font-size: .8rem; }
+.selected { border-top: 1px solid var(--line); padding-top: .9rem; margin-bottom: .9rem; }
+.selected[hidden] { display: none; }
+.runid { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .9rem; }
+.runid .k {
+  color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+}
+#wh-runid {
+  font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--fg);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  padding: .28rem .6rem; min-width: 21rem; max-width: 100%;
+}
+.kpis { display: flex; flex-wrap: wrap; gap: 1.5rem; }
+.kpi .v { font-size: 1.15rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.kpi .k {
+  color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+}
+.topology .node.failed .box { stroke: var(--err-line); stroke-width: 2; }
+.topology .node.touched .label { fill: var(--fg); }
+.topology .node:not(.touched) .label { opacity: .55; }
 .off { color: var(--muted); }
 .empty {
   color: var(--muted); padding: 1.5rem; text-align: center;
@@ -169,6 +200,212 @@ footer {
   color: var(--muted); font-size: .78rem; margin-top: 2rem;
   border-top: 1px solid var(--line); padding-top: .85rem;
 }
+"""
+
+
+# The page's only script. It reads two JSON endpoints and then does exactly one
+# thing to the document: sets attributes and textContent on elements the server
+# already rendered. It never assigns innerHTML and never builds markup from a
+# string, so no value returned by the API can reach the DOM as markup -- the
+# same invariant `wardhook.observability`'s viewer holds, for the same reason.
+#
+# Colour is applied as fill-opacity over `var(--bar)` rather than as a computed
+# colour, so the overlay follows the reader's light or dark theme without this
+# script needing to know which one is in force.
+_SCRIPT = """
+(function () {
+  var picker = document.getElementById('wh-run');
+  if (!picker) return;
+  var refresh = document.getElementById('wh-refresh');
+  var status = document.getElementById('wh-status');
+  var selected = document.getElementById('wh-selected');
+  var runIdField = document.getElementById('wh-runid');
+  var copy = document.getElementById('wh-copy');
+  var kpis = document.getElementById('wh-kpis');
+  var extra = document.getElementById('wh-extra');
+  var base = window.location.pathname.replace(/\\/?$/, '/');
+
+  function fmtMs(v) {
+    return v < 1000 ? Math.round(v) + 'ms' : (v / 1000).toFixed(2) + 's';
+  }
+  function fmtCost(v) {
+    if (!v) return '$0';
+    return v < 0.01 ? '$' + v.toFixed(5) : '$' + v.toFixed(4);
+  }
+  function fmtInt(v) {
+    return (v || 0).toLocaleString('en-US');
+  }
+
+  function clearOverlay() {
+    document.querySelectorAll('.topology .node').forEach(function (node) {
+      var box = node.querySelector('.box');
+      box.style.fill = '';
+      box.style.fillOpacity = '';
+      node.classList.remove('failed');
+      node.classList.remove('touched');
+    });
+    document.querySelectorAll('.topology .metric').forEach(function (label) {
+      label.textContent = '';
+    });
+  }
+
+  function kpi(key, value) {
+    var wrap = document.createElement('div');
+    wrap.className = 'kpi';
+    var v = document.createElement('div');
+    v.className = 'v';
+    v.textContent = value;
+    var k = document.createElement('div');
+    k.className = 'k';
+    k.textContent = key;
+    wrap.appendChild(v);
+    wrap.appendChild(k);
+    return wrap;
+  }
+
+  // One node can execute several times in a run: the tool loop returns to
+  // call_model on every round trip. Totalling them is the only honest answer --
+  // showing the last execution alone would quietly under-report the node the
+  // run's own totals say cost the most.
+  function byNode(steps) {
+    var seen = {};
+    var order = [];
+    steps.forEach(function (step) {
+      var agg = seen[step.node];
+      if (!agg) {
+        agg = seen[step.node] = {
+          node: step.node, latency_ms: 0, tokens_in: 0, tokens_out: 0,
+          cost: 0, visits: 0, error: null
+        };
+        order.push(agg);
+      }
+      agg.latency_ms += step.latency_ms;
+      agg.tokens_in += step.tokens_in;
+      agg.tokens_out += step.tokens_out;
+      agg.cost += step.cost;
+      agg.visits += 1;
+      if (step.error) agg.error = step.error;
+    });
+    return order;
+  }
+
+  function paint(run) {
+    clearOverlay();
+    runIdField.value = run.run_id;
+    var aggregated = byNode(run.steps);
+    var slowest = 0;
+    aggregated.forEach(function (agg) {
+      if (agg.latency_ms > slowest) slowest = agg.latency_ms;
+    });
+
+    var orphans = [];
+    aggregated.forEach(function (agg) {
+      var node = document.querySelector('.topology [data-node="' + agg.node + '"]');
+      if (!node) {
+        orphans.push(agg);
+        return;
+      }
+      var share = slowest > 0 ? agg.latency_ms / slowest : 0;
+      var box = node.querySelector('.box');
+      box.style.fill = 'var(--bar)';
+      box.style.fillOpacity = (0.07 + 0.5 * share).toFixed(3);
+      node.classList.add('touched');
+      if (agg.error) node.classList.add('failed');
+
+      var parts = [];
+      if (agg.visits > 1) parts.push('\\u00d7' + agg.visits);
+      parts.push(fmtMs(agg.latency_ms));
+      if (agg.tokens_in || agg.tokens_out) {
+        parts.push(fmtInt(agg.tokens_in) + ' in / ' + fmtInt(agg.tokens_out) + ' out');
+      }
+      if (agg.cost) parts.push(fmtCost(agg.cost));
+      node.querySelector('.metric').textContent = parts.join('  \\u00b7  ');
+    });
+
+    kpis.textContent = '';
+    kpis.appendChild(kpi('steps', String(run.totals.steps)));
+    kpis.appendChild(kpi('latency', fmtMs(run.latency_ms)));
+    kpis.appendChild(kpi('tokens in', fmtInt(run.totals.tokens_in)));
+    kpis.appendChild(kpi('tokens out', fmtInt(run.totals.tokens_out)));
+    kpis.appendChild(kpi('cached', fmtInt(run.totals.cached_tokens)));
+    kpis.appendChild(kpi('cost', fmtCost(run.totals.cost)));
+    if (run.failed) kpis.appendChild(kpi('status', 'failed'));
+
+    if (orphans.length) {
+      var names = orphans.map(function (agg) {
+        return agg.node + ' (' + fmtMs(agg.latency_ms) + ', ' + fmtCost(agg.cost) + ')';
+      });
+      extra.textContent =
+        'Recorded but not on the diagram: ' + names.join(', ') +
+        '. Token usage that arrived while no node was open is attributed here ' +
+        'rather than discarded, because a cost you cannot attribute is still a ' +
+        'cost you paid.';
+    } else {
+      extra.textContent = '';
+    }
+    selected.hidden = false;
+  }
+
+  function select(runId) {
+    if (!runId) {
+      clearOverlay();
+      selected.hidden = true;
+      return;
+    }
+    fetch(base + 'api/runs/' + encodeURIComponent(runId))
+      .then(function (response) {
+        if (!response.ok) throw new Error('run not found');
+        return response.json();
+      })
+      .then(paint)
+      .catch(function () {
+        status.textContent = 'That run is no longer held. Refresh the list.';
+      });
+  }
+
+  function load() {
+    status.textContent = 'loading...';
+    fetch(base + 'api/runs')
+      .then(function (response) { return response.json(); })
+      .then(function (data) {
+        picker.textContent = '';
+        picker.appendChild(new Option('- select a run -', ''));
+        data.runs.forEach(function (run) {
+          var label =
+            run.run_id.slice(0, 12) + '  ' + fmtMs(run.latency_ms) +
+            '  ' + fmtCost(run.totals.cost) + (run.failed ? '  failed' : '');
+          picker.appendChild(new Option(label, run.run_id));
+        });
+        if (!data.runs.length) {
+          status.textContent = 'No runs recorded yet. Invoke the agent, then refresh.';
+          clearOverlay();
+          selected.hidden = true;
+          return;
+        }
+        status.textContent =
+          data.returned < data.total
+            ? 'showing ' + data.returned + ' of ' + data.total + ' runs'
+            : data.total + (data.total === 1 ? ' run' : ' runs');
+        picker.value = data.runs[0].run_id;
+        select(picker.value);
+      })
+      .catch(function () {
+        status.textContent = 'Could not read the run list.';
+      });
+  }
+
+  picker.addEventListener('change', function () { select(picker.value); });
+  refresh.addEventListener('click', load);
+  copy.addEventListener('click', function () {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(runIdField.value);
+    } else {
+      runIdField.select();
+    }
+    status.textContent = 'run_id copied - look it up in your own audit log';
+  });
+  load();
+})();
 """
 
 
@@ -397,6 +634,7 @@ def _render_page(agent: Any, sink: Any) -> str:
     described = _describe(agent)
     name = str(described["name"])
     mode = _sink_mode(sink)
+    script = f"<script>{_SCRIPT}</script>" if mode != "none" else ""
 
     facts = (
         f'<dt>type</dt><dd class="mono">{escape(str(described["type"]))}</dd>'
@@ -405,6 +643,25 @@ def _render_page(agent: Any, sink: Any) -> str:
         f"<dt>retrieval</dt><dd>{_enabled(described['retrieval_enabled'])}</dd>"
         f"<dt>telemetry</dt><dd>{_enabled(described['telemetry_enabled'])}</dd>"
     )
+
+    runbar = ""
+    if mode != "none":
+        runbar = (
+            '<div class="runbar">'
+            '<label for="wh-run">Run</label>'
+            '<select id="wh-run"></select>'
+            '<button id="wh-refresh" type="button">Refresh</button>'
+            '<span id="wh-status"></span>'
+            "</div>"
+            '<div id="wh-selected" class="selected" hidden>'
+            '<div class="runid"><span class="k">run_id</span>'
+            '<input id="wh-runid" readonly value="">'
+            '<button id="wh-copy" type="button">Copy</button>'
+            "</div>"
+            '<div class="kpis" id="wh-kpis"></div>'
+            '<p class="legend" id="wh-extra"></p>'
+            "</div>"
+        )
 
     topology = read_topology(agent)
     diagram = render_svg(topology)
@@ -429,7 +686,7 @@ def _render_page(agent: Any, sink: Any) -> str:
         f'<div class="sub">Structure and cost of this agent. '
         f"No prompts, no responses, no retrieved text.</div>"
         f'<div class="banner {escape(mode)}">{escape(_MODE_NOTES[mode])}</div>'
-        f'<section class="card"><h2>Topology</h2>{picture}</section>'
+        f'<section class="card"><h2>Topology</h2>{runbar}{picture}</section>'
         f'<section class="card"><h2>Configuration</h2>'
         f'<dl class="facts">{facts}</dl></section>'
         f"<footer>Served by wardhook-core. This page shows telemetry and "
@@ -437,7 +694,7 @@ def _render_page(agent: Any, sink: Any) -> str:
         f"or guardrail event bodies. Use a run's run_id to correlate it with "
         f"your own audit log, where your redaction policy applies. This page "
         f"makes no network requests.</footer>"
-        f"</div></body></html>"
+        f"</div>{script}</body></html>"
     )
 
 

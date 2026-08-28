@@ -184,7 +184,7 @@ Pre-1.0 and built in the open. All four packages are complete.
 
 | Package | Status | Tests | Coverage |
 | --- | --- | --- | --- |
-| wardhook-core | ✅ Complete | 290 | 100% |
+| wardhook-core | ✅ Complete | 299 | 100% |
 | wardhook-guardrails | ✅ Complete | 222 | 100% |
 | wardhook-observability | ✅ Complete | 162 | 100% |
 | wardhook-evals | ✅ Complete | 170 | 100% |
