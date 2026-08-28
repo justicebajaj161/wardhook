@@ -9,7 +9,33 @@ All four packages are versioned in lockstep while the project is pre-1.0.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **A read-only dashboard API in `wardhook-core`.**
+  `wardhook.core.serve.create_dashboard(agent, telemetry=None)` builds a FastAPI
+  application exposing `GET /api/topology`, `GET /api/runs` and
+  `GET /api/runs/{run_id}`. The topology is read from the agent's own compiled
+  graph, so it is accurate to the configuration rather than to a template: an
+  agent with no retriever genuinely reports no `retrieve` node.
+- **`wardhook.core.serve.read_topology(agent)`** and the `Topology`,
+  `TopologyNode` and `TopologyEdge` records it returns. Anything without a
+  graph — a plain callable with `.invoke()` is a supported target — reports
+  `available=False` with a reason rather than raising.
+
+### Notes
+
+- **The dashboard serves telemetry and configuration only, never content.** No
+  prompt, completion, retrieved chunk or guardrail-event body reaches it. The
+  step projection is an explicit allowlist, so a content field added to the
+  telemetry model upstream cannot start being served by accident; there is a
+  test pinning that. `run_id` is carried on every run and every step, and it is
+  the intended join key back to your own audit log, where your redaction and
+  retention policy already apply.
+- **The telemetry sink is read structurally, and both shapes are supported.**
+  `Tracer` lists with `traces()`; `JSONLTraceStore` lists with `read()`. The API
+  reports which one it found as a `mode`, because an in-memory tracer under
+  multiple workers only sees its own process's traffic — a limitation that is
+  disclosed rather than hidden.
 
 ## [0.1.1] — 2026-08-27
 

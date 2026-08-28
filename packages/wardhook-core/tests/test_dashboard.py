@@ -1,0 +1,509 @@
+"""Tests for the read-only dashboard API and the topology reader.
+
+Every telemetry object here is a local fake. Importing ``wardhook.observability``
+would make this suite fail in the standalone-install matrix, which is the check
+that keeps the four packages independent -- and the dashboard's whole claim is
+that it reads a sink structurally rather than depending on one.
+"""
+
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+
+import pytest
+from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage
+
+from wardhook.core.agent import AgentGraph
+from wardhook.core.rag.retriever import Retriever
+from wardhook.core.serve.dashboard import create_dashboard
+from wardhook.core.serve.topology import read_topology
+
+
+class Allower:
+    name = "allower"
+
+    def on_input(self, text, context):
+        return SimpleNamespace(action="allow", text=text, reason=None, rule=None)
+
+
+def usage(inp=0, out=0, cached=0):
+    """A token-usage lookalike, matching observability's field names."""
+    return SimpleNamespace(input_tokens=inp, output_tokens=out, cache_read_tokens=cached)
+
+
+def step(node, **overrides):
+    """A TraceStep lookalike with sensible defaults."""
+    fields = {
+        "node": node,
+        "run_id": "run-1",
+        "started_at": "2026-08-27T10:00:00+00:00",
+        "latency_ms": 12.0,
+        "usage": usage(),
+        "cost": 0.0,
+        "model": None,
+        "error": None,
+    }
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
+def trace(run_id="run-1", steps=(), **overrides):
+    """A Trace lookalike with sensible defaults."""
+    fields = {
+        "run_id": run_id,
+        "steps": tuple(steps),
+        "started_at": "2026-08-27T10:00:00+00:00",
+        "latency_ms": 40.0,
+        "metadata": {"agent": "demo", "model": "claude-opus-5"},
+        "error": None,
+    }
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
+class MemorySink:
+    """A Tracer lookalike: lists with traces(), looks up with get_trace()."""
+
+    def __init__(self, *traces):
+        self._traces = list(traces)
+
+    def traces(self):
+        return list(self._traces)
+
+    def get_trace(self, run_id=None):
+        return next((t for t in self._traces if t.run_id == run_id), None)
+
+
+class StoreSink:
+    """A JSONLTraceStore lookalike: lists with read(), looks up with read_one()."""
+
+    def __init__(self, *traces):
+        self.path = "traces.jsonl"
+        self._traces = list(traces)
+
+    def read(self):
+        return list(self._traces)
+
+    def read_one(self, run_id):
+        return next((t for t in self._traces if t.run_id == run_id), None)
+
+
+class DeafSink:
+    """A sink exposing neither read shape. Reported honestly, never crashed on."""
+
+
+class Minimal:
+    """A bare callable target: legitimate to serve, but it has no graph."""
+
+    def invoke(self, text, **kwargs):
+        return {"output": f"echo: {text}"}
+
+
+@pytest.fixture
+def full_agent(make_tool_model, echo_tool, sample_store):
+    return AgentGraph(
+        model=make_tool_model(AIMessage(content="ok")),
+        tools=[echo_tool],
+        guardrails=[Allower()],
+        retriever=Retriever(sample_store),
+        name="full",
+    )
+
+
+@pytest.fixture
+def bare_agent(make_model):
+    return AgentGraph(model=make_model("ok"), name="bare")
+
+
+class TestReadTopology:
+    def test_a_configured_agent_reports_every_node_it_built(self, full_agent):
+        topology = read_topology(full_agent)
+        assert topology.available is True
+        assert set(topology.keys) == {
+            "__start__",
+            "guard_input",
+            "retrieve",
+            "call_model",
+            "tools",
+            "guard_output",
+            "__end__",
+        }
+
+    def test_an_unconfigured_agent_genuinely_has_fewer_nodes(self, bare_agent, full_agent):
+        # The whole value of a topology view is that it is configuration-accurate:
+        # an agent with no retriever has no retrieve box because it has no
+        # retrieve node, not because a template hid it.
+        bare = read_topology(bare_agent)
+        assert set(bare.keys) == {"__start__", "call_model", "__end__"}
+        assert len(bare.nodes) < len(read_topology(full_agent).nodes)
+
+    def test_conditional_edges_keep_their_branch_labels(self, full_agent):
+        conditional = {
+            (edge.source, edge.target, edge.label)
+            for edge in read_topology(full_agent).edges
+            if edge.conditional
+        }
+        assert ("guard_input", "__end__", "blocked") in conditional
+        assert ("guard_input", "retrieve", "continue") in conditional
+        assert ("call_model", "guard_output", "finish") in conditional
+        # LangGraph drops a branch label that merely repeats its target node's
+        # name, so the tools branch is conditional but unlabelled. Asserted
+        # rather than worked around: the topology reports what the graph says.
+        assert ("call_model", "tools", None) in conditional
+
+    def test_unconditional_edges_carry_no_label(self, bare_agent):
+        edges = {(e.source, e.target): e for e in read_topology(bare_agent).edges}
+        assert edges[("__start__", "call_model")].label is None
+        assert edges[("__start__", "call_model")].conditional is False
+
+    def test_mermaid_source_is_carried_for_export(self, bare_agent):
+        assert "call_model" in (read_topology(bare_agent).mermaid or "")
+
+    def test_an_object_with_no_graph_is_reported_not_raised(self):
+        topology = read_topology(Minimal())
+        assert topology.available is False
+        assert topology.nodes == ()
+        assert "no .graph attribute" in (topology.reason or "")
+
+    def test_a_graph_without_get_graph_is_reported(self):
+        topology = read_topology(SimpleNamespace(graph=SimpleNamespace()))
+        assert topology.available is False
+        assert "no get_graph()" in (topology.reason or "")
+
+    def test_a_raising_get_graph_becomes_a_reason_not_a_crash(self):
+        def boom():
+            raise RuntimeError("graph is corrupt")
+
+        topology = read_topology(SimpleNamespace(graph=SimpleNamespace(get_graph=boom)))
+        assert topology.available is False
+        assert "RuntimeError: graph is corrupt" in (topology.reason or "")
+
+    def test_a_graph_that_cannot_draw_still_yields_its_nodes(self):
+        # Losing the export diagram must not cost the caller the topology.
+        graph = SimpleNamespace(nodes={"a": SimpleNamespace(name="a")}, edges=[])
+        topology = read_topology(SimpleNamespace(graph=SimpleNamespace(get_graph=lambda: graph)))
+        assert topology.keys == ("a",)
+        assert topology.mermaid is None
+
+    def test_a_raising_draw_mermaid_still_yields_its_nodes(self):
+        def boom():
+            raise RuntimeError("renderer failed")
+
+        graph = SimpleNamespace(nodes={"a": SimpleNamespace(name="a")}, edges=[], draw_mermaid=boom)
+        topology = read_topology(SimpleNamespace(graph=SimpleNamespace(get_graph=lambda: graph)))
+        assert topology.keys == ("a",)
+        assert topology.mermaid is None
+
+    def test_an_empty_graph_is_not_an_error(self):
+        graph = SimpleNamespace(nodes=None, edges=None)
+        topology = read_topology(SimpleNamespace(graph=SimpleNamespace(get_graph=lambda: graph)))
+        assert topology.available is True
+        assert topology.to_dict()["nodes"] == []
+
+    def test_a_node_without_a_name_falls_back_to_its_key(self):
+        graph = SimpleNamespace(nodes={"a": object()}, edges=[])
+        topology = read_topology(SimpleNamespace(graph=SimpleNamespace(get_graph=lambda: graph)))
+        assert topology.nodes[0].name == "a"
+
+    def test_an_edge_without_endpoints_does_not_crash_the_read(self):
+        graph = SimpleNamespace(nodes={}, edges=[object()])
+        topology = read_topology(SimpleNamespace(graph=SimpleNamespace(get_graph=lambda: graph)))
+        assert topology.edges[0].to_dict() == {
+            "source": "",
+            "target": "",
+            "label": None,
+            "conditional": False,
+        }
+
+
+class TestTopologyEndpoint:
+    def test_it_reports_nodes_edges_and_configuration(self, full_agent):
+        body = TestClient(create_dashboard(full_agent)).get("/api/topology").json()
+        assert body["agent"] == "full"
+        assert body["available"] is True
+        assert {node["id"] for node in body["nodes"]} >= {"retrieve", "tools"}
+        assert body["config"]["retrieval_enabled"] is True
+        assert body["mermaid"].strip() != ""
+
+    def test_an_agent_without_a_graph_gets_a_reason_not_a_500(self):
+        body = TestClient(create_dashboard(Minimal())).get("/api/topology").json()
+        assert body["available"] is False
+        assert body["nodes"] == []
+        assert "no .graph attribute" in body["reason"]
+
+
+class TestRunsEndpoint:
+    def test_no_telemetry_is_an_empty_list_not_an_error(self, bare_agent):
+        # An agent constructed without telemetry is the common case, and it must
+        # not turn the dashboard into an error page.
+        body = TestClient(create_dashboard(bare_agent)).get("/api/runs").json()
+        assert body["mode"] == "none"
+        assert body["runs"] == []
+        assert "No readable telemetry" in body["mode_note"]
+
+    def test_a_sink_exposing_neither_read_shape_is_reported_honestly(self, bare_agent):
+        client = TestClient(create_dashboard(bare_agent, telemetry=DeafSink()))
+        assert client.get("/api/runs").json()["mode"] == "none"
+
+    def test_an_in_memory_tracer_is_labelled_as_one_process_only(self, bare_agent):
+        sink = MemorySink(trace("run-1"), trace("run-2"))
+        body = TestClient(create_dashboard(bare_agent, telemetry=sink)).get("/api/runs").json()
+        assert body["mode"] == "memory"
+        assert "1/N of traffic" in body["mode_note"]
+
+    def test_a_shared_store_is_labelled_as_complete(self, bare_agent):
+        sink = StoreSink(trace("run-1"))
+        body = TestClient(create_dashboard(bare_agent, telemetry=sink)).get("/api/runs").json()
+        assert body["mode"] == "store"
+        assert "every run" in body["mode_note"].lower()
+
+    def test_runs_are_returned_newest_first(self, bare_agent):
+        sink = MemorySink(trace("oldest"), trace("middle"), trace("newest"))
+        body = TestClient(create_dashboard(bare_agent, telemetry=sink)).get("/api/runs").json()
+        assert [run["run_id"] for run in body["runs"]] == ["newest", "middle", "oldest"]
+
+    def test_the_limit_caps_the_page_but_the_total_stays_honest(self, bare_agent):
+        sink = MemorySink(*[trace(f"run-{i}") for i in range(5)])
+        body = (
+            TestClient(create_dashboard(bare_agent, telemetry=sink))
+            .get("/api/runs", params={"limit": 2})
+            .json()
+        )
+        assert body["total"] == 5
+        assert body["returned"] == 2
+        assert len(body["runs"]) == 2
+
+    def test_an_out_of_range_limit_is_rejected_by_validation(self, bare_agent):
+        client = TestClient(create_dashboard(bare_agent, telemetry=MemorySink()))
+        assert client.get("/api/runs", params={"limit": 0}).status_code == 422
+        assert client.get("/api/runs", params={"limit": 100000}).status_code == 422
+
+    def test_a_summary_carries_totals_but_never_the_steps(self, bare_agent):
+        sink = MemorySink(
+            trace("run-1", steps=[step("call_model", usage=usage(900, 120, 400), cost=0.0057)])
+        )
+        summary = (
+            TestClient(create_dashboard(bare_agent, telemetry=sink)).get("/api/runs").json()["runs"]
+        )[0]
+        assert "steps" not in summary
+        assert summary["totals"] == {
+            "steps": 1,
+            "tokens_in": 900,
+            "tokens_out": 120,
+            "cached_tokens": 400,
+            "cost": 0.0057,
+        }
+
+    def test_the_agents_own_tracer_is_used_when_none_is_passed(self, make_model):
+        sink = MemorySink(trace("run-1"))
+        agent = AgentGraph(model=make_model("ok"), telemetry=sink, name="wired")
+        body = TestClient(create_dashboard(agent)).get("/api/runs").json()
+        assert [run["run_id"] for run in body["runs"]] == ["run-1"]
+
+    def test_an_explicit_sink_overrides_the_agents_own(self, make_model):
+        # This is the documented multi-worker mitigation: the agent keeps writing
+        # through its in-memory tracer while the dashboard reads the shared file.
+        agent = AgentGraph(model=make_model("ok"), telemetry=MemorySink(trace("in-memory")))
+        client = TestClient(create_dashboard(agent, telemetry=StoreSink(trace("on-disk"))))
+        body = client.get("/api/runs").json()
+        assert body["mode"] == "store"
+        assert [run["run_id"] for run in body["runs"]] == ["on-disk"]
+
+
+class TestOneRunEndpoint:
+    def test_it_returns_per_node_timing_tokens_and_cost(self, bare_agent):
+        sink = MemorySink(
+            trace(
+                "run-1",
+                steps=[
+                    step("guard_input", latency_ms=1.5),
+                    step(
+                        "call_model",
+                        latency_ms=412.5,
+                        usage=usage(900, 120, 400),
+                        cost=0.0057,
+                        model="claude-opus-5",
+                    ),
+                ],
+            )
+        )
+        body = TestClient(create_dashboard(bare_agent, telemetry=sink)).get("/api/runs/run-1")
+        assert body.status_code == 200
+        steps = body.json()["steps"]
+        assert [s["node"] for s in steps] == ["guard_input", "call_model"]
+        assert steps[1] == {
+            "node": "call_model",
+            "run_id": "run-1",
+            "started_at": "2026-08-27T10:00:00+00:00",
+            "latency_ms": 412.5,
+            "cost": 0.0057,
+            "model": "claude-opus-5",
+            "error": None,
+            "tokens_in": 900,
+            "tokens_out": 120,
+            "cached_tokens": 400,
+        }
+
+    def test_an_unknown_run_is_a_404_with_an_actionable_reason(self, bare_agent):
+        client = TestClient(create_dashboard(bare_agent, telemetry=MemorySink()))
+        response = client.get("/api/runs/nope")
+        assert response.status_code == 404
+        assert "evicted" in response.json()["detail"]
+
+    def test_a_store_shaped_sink_is_looked_up_through_read_one(self, bare_agent):
+        sink = StoreSink(trace("run-7", steps=[step("call_model")]))
+        client = TestClient(create_dashboard(bare_agent, telemetry=sink))
+        assert client.get("/api/runs/run-7").json()["run_id"] == "run-7"
+        assert client.get("/api/runs/absent").status_code == 404
+
+    def test_a_sink_that_cannot_look_runs_up_is_a_404_not_a_crash(self, bare_agent):
+        client = TestClient(create_dashboard(bare_agent, telemetry=DeafSink()))
+        assert client.get("/api/runs/anything").status_code == 404
+
+    def test_a_failed_node_marks_the_whole_run_failed(self, bare_agent):
+        sink = MemorySink(trace("run-1", steps=[step("tools", error="ValueError: bad args")]))
+        body = TestClient(create_dashboard(bare_agent, telemetry=sink)).get("/api/runs/run-1")
+        assert body.json()["failed"] is True
+        assert body.json()["steps"][0]["error"] == "ValueError: bad args"
+
+    def test_a_failed_run_with_healthy_steps_is_still_failed(self, bare_agent):
+        sink = MemorySink(trace("run-1", steps=[step("call_model")], error="TimeoutError"))
+        body = TestClient(create_dashboard(bare_agent, telemetry=sink)).get("/api/runs/run-1")
+        assert body.json()["failed"] is True
+
+    def test_a_healthy_run_is_not_failed(self, bare_agent):
+        sink = MemorySink(trace("run-1", steps=[step("call_model")]))
+        body = TestClient(create_dashboard(bare_agent, telemetry=sink)).get("/api/runs/run-1")
+        assert body.json()["failed"] is False
+
+    def test_a_node_that_called_no_model_reports_zero_tokens(self, bare_agent):
+        # Guardrail and retrieval nodes have no usage at all; that is not an error.
+        sink = MemorySink(trace("run-1", steps=[step("guard_input", usage=None)]))
+        body = TestClient(create_dashboard(bare_agent, telemetry=sink)).get("/api/runs/run-1")
+        assert body.json()["steps"][0]["tokens_in"] == 0
+
+    def test_a_trace_with_no_steps_totals_to_zero(self, bare_agent):
+        # steps and metadata are absent rather than empty, which is what a sink
+        # from outside Wardhook may well hand over.
+        sink = MemorySink(SimpleNamespace(run_id="run-1", steps=None, metadata=None))
+        body = (
+            TestClient(create_dashboard(bare_agent, telemetry=sink)).get("/api/runs/run-1").json()
+        )
+        assert body["totals"] == {
+            "steps": 0,
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cached_tokens": 0,
+            "cost": 0,
+        }
+        assert body["metadata"] == {}
+
+
+class TestContentNeverLeaks:
+    def test_a_content_field_added_upstream_does_not_reach_the_api(self, bare_agent):
+        # The load-bearing test for this whole feature. The projection in
+        # dashboard.py is an allowlist, so a prompt field appearing on an
+        # upstream step type cannot start being served by accident. If this test
+        # ever fails, the dashboard has become a PII store.
+        leaky_step = step("call_model")
+        leaky_step.prompt = "My SSN is 123-45-6789"
+        leaky_step.completion = "Your SSN 123-45-6789 is on file"
+        leaky_trace = trace("run-1", steps=[leaky_step])
+        leaky_trace.transcript = "the entire conversation"
+
+        client = TestClient(create_dashboard(bare_agent, telemetry=MemorySink(leaky_trace)))
+        for path in ("/api/runs", "/api/runs/run-1"):
+            body = client.get(path).text
+            assert "123-45-6789" not in body
+            assert "prompt" not in body
+            assert "completion" not in body
+            assert "transcript" not in body
+
+    def test_the_step_projection_is_a_closed_set_of_keys(self, bare_agent):
+        # Pinned explicitly so that widening it is a deliberate, reviewed edit
+        # rather than a side effect of a change somewhere upstream.
+        sink = MemorySink(trace("run-1", steps=[step("call_model")]))
+        body = TestClient(create_dashboard(bare_agent, telemetry=sink)).get("/api/runs/run-1")
+        assert set(body.json()["steps"][0]) == {
+            "node",
+            "run_id",
+            "started_at",
+            "latency_ms",
+            "cost",
+            "model",
+            "error",
+            "tokens_in",
+            "tokens_out",
+            "cached_tokens",
+        }
+
+    def test_guardrail_events_are_not_exposed_anywhere(self, make_model):
+        # Core returns guardrail_events from invoke(); the dashboard must not
+        # surface them. They name the rule that fired, and on some guardrails
+        # that is enough to infer the redacted value.
+        agent = AgentGraph(model=make_model("ok"), guardrails=[Allower()], name="guarded")
+        client = TestClient(create_dashboard(agent))
+        payload = json.dumps(
+            [client.get(p).json() for p in ("/api/topology", "/api/runs")],
+        )
+        assert "guardrail_events" not in payload
+
+
+class TestRunIdIsTheJoinKey:
+    def test_every_step_carries_the_run_id_it_belongs_to(self, bare_agent):
+        # run_id is the documented way back to the caller's own audit log, which
+        # is why the dashboard does not need a copy of the content.
+        sink = MemorySink(trace("run-42", steps=[step("call_model", run_id="run-42")]))
+        client = TestClient(create_dashboard(bare_agent, telemetry=sink))
+        body = client.get("/api/runs/run-42").json()
+        assert body["run_id"] == "run-42"
+        assert {s["run_id"] for s in body["steps"]} == {"run-42"}
+
+
+class TestAgainstTheRealAgent:
+    def test_a_real_run_produces_a_trace_whose_nodes_are_in_the_topology(self, make_model):
+        # An end-to-end check with a hand-rolled sink standing in for a tracer:
+        # the join the trace overlay depends on has to hold for real node names,
+        # not just for the ones the fixtures invent.
+        class RecordingSink:
+            """Enough of TelemetryProtocol to be driven by a real invocation."""
+
+            def __init__(self):
+                self.open_steps = []
+                self.finished = []
+
+            def start_run(self, run_id, metadata=None):
+                self.open_steps = []
+
+            def end_run(self, run_id, error=None):
+                self.finished.append(trace(run_id, steps=list(self.open_steps)))
+
+            def start_node(self, node, run_id):
+                pass
+
+            def end_node(self, node, run_id, error=None):
+                self.open_steps.append(step(node, run_id=run_id))
+
+            def callbacks(self):
+                return []
+
+            def traces(self):
+                return list(self.finished)
+
+            def get_trace(self, run_id=None):
+                return next((t for t in self.finished if t.run_id == run_id), None)
+
+        sink = RecordingSink()
+        agent = AgentGraph(
+            model=make_model("ok"), guardrails=[Allower()], telemetry=sink, name="real"
+        )
+        run_id = agent.invoke("hello")["run_id"]
+
+        client = TestClient(create_dashboard(agent))
+        topology_keys = {n["id"] for n in client.get("/api/topology").json()["nodes"]}
+        run = client.get(f"/api/runs/{run_id}").json()
+
+        assert run["steps"], "the run recorded no steps"
+        assert {s["node"] for s in run["steps"]} <= topology_keys
