@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wardhook-observability"
-version = "0.1.1"
+version = "0.2.0"
 description = "Per-node token, cost, and latency tracing for LangGraph agents, with a self-contained HTML trace viewer."
 readme = "README.md"
 license = { file = "LICENSE" }

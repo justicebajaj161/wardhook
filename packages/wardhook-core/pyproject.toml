@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wardhook-core"
-version = "0.1.1"
+version = "0.2.0"
 description = "LangGraph agent runtime with tool calling, RAG with source citations, and a one-command FastAPI server."
 readme = "README.md"
 license = { file = "LICENSE" }

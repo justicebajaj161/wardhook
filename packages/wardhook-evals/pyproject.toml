@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wardhook-evals"
-version = "0.1.1"
+version = "0.2.0"
 description = "JSONL test cases, a pass/fail runner, and baseline regression detection for LLM agents."
 readme = "README.md"
 license = { file = "LICENSE" }

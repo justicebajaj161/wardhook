@@ -9,6 +9,14 @@ All four packages are versioned in lockstep while the project is pre-1.0.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.0] — 2026-08-28
+
+The local dashboard, and the first measured number for PII detection. Nothing
+published changed shape: every entry below is additive, and `GET /info` gained
+keys rather than losing any.
+
 ### Added
 
 - **A read-only dashboard API in `wardhook-core`.**
@@ -240,6 +248,7 @@ are versioned in lockstep until it settles.
   1.30.0 and 1.32.0 emit `Metadata-Version: 2.5`, which `packaging` rejects, so
   wheels built with them cannot be published.
 
-[Unreleased]: https://github.com/justicebajaj161/wardhook/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/justicebajaj161/wardhook/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/justicebajaj161/wardhook/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/justicebajaj161/wardhook/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/justicebajaj161/wardhook/releases/tag/v0.1.0

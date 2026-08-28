@@ -40,7 +40,7 @@ from wardhook.core.rag.store import InMemoryVectorStore, SearchResult
 from wardhook.core.state import AgentState, Citation, Principal
 from wardhook.core.tools import ToolRegistrationError, normalize_tools
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 __all__ = [
     "DEFAULT_MODEL",
