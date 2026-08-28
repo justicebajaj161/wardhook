@@ -348,3 +348,121 @@ class TestCallableTargets:
 
         assert response.status_code == 200
         assert response.json()["output"] == "echo: hello"
+
+
+class TestDashboardMounting:
+    def test_it_is_off_unless_asked_for(self, client):
+        # The default a governance tool has to have: a debug UI that nobody
+        # turned on is not running.
+        assert client.get("/dashboard/").status_code == 404
+
+    def test_it_mounts_when_asked_for(self, make_model):
+        app = create_app(AgentGraph(model=make_model("ok"), name="mounted"), dashboard=True)
+        assert TestClient(app).get("/dashboard/").status_code == 200
+        assert TestClient(app).get("/dashboard/api/topology").json()["agent"] == "mounted"
+
+    def test_mounting_it_does_not_disturb_the_agent_endpoints(self, make_model):
+        app = create_app(AgentGraph(model=make_model("Hello there."), name="m"), dashboard=True)
+        client = TestClient(app)
+        assert client.get("/health").json()["status"] == "ok"
+        assert client.post("/invoke", json={"input": "hi"}).json()["output"] == "Hello there."
+
+    def test_it_can_be_mounted_somewhere_else(self, make_model):
+        app = create_app(
+            AgentGraph(model=make_model("ok")), dashboard=True, dashboard_path="/_internal/ops"
+        )
+        client = TestClient(app)
+        assert client.get("/_internal/ops/").status_code == 200
+        assert client.get("/dashboard/").status_code == 404
+
+    def test_the_environment_variable_can_turn_it_on(self, make_model, monkeypatch):
+        monkeypatch.setenv("WARDHOOK_DASHBOARD", "1")
+        app = create_app(AgentGraph(model=make_model("ok")))
+        assert TestClient(app).get("/dashboard/").status_code == 200
+
+    def test_an_explicit_false_beats_the_environment_variable(self, make_model, monkeypatch):
+        # Otherwise an environment variable set for one service could turn the
+        # UI on in another that had deliberately switched it off.
+        monkeypatch.setenv("WARDHOOK_DASHBOARD", "1")
+        app = create_app(AgentGraph(model=make_model("ok")), dashboard=False)
+        assert TestClient(app).get("/dashboard/").status_code == 404
+
+    def test_an_unrecognised_environment_value_leaves_it_off(self, make_model, monkeypatch):
+        monkeypatch.setenv("WARDHOOK_DASHBOARD", "maybe")
+        app = create_app(AgentGraph(model=make_model("ok")))
+        assert TestClient(app).get("/dashboard/").status_code == 404
+
+    def test_a_shared_sink_can_be_handed_to_the_dashboard(self, make_model):
+        # The documented multi-worker mitigation, reachable from create_app:
+        # the agent writes through its own tracer, the dashboard reads the file.
+        class StoreSink:
+            path = "traces.jsonl"
+
+            def read(self):
+                return []
+
+        app = create_app(AgentGraph(model=make_model("ok")), dashboard=True, telemetry=StoreSink())
+        assert TestClient(app).get("/dashboard/api/runs").json()["mode"] == "store"
+
+
+class TestDashboardBindGuard:
+    def _run(self, tmp_path, monkeypatch, *args):
+        _write_agent_module(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        captured = {}
+
+        import uvicorn
+
+        monkeypatch.setattr(
+            uvicorn, "run", lambda application, **kw: captured.update(app=application, **kw)
+        )
+        return runner.invoke(cli_app, ["serve", "cli_agent_mod:agent", *args]), captured
+
+    def test_the_dashboard_url_is_printed_when_it_is_on(self, tmp_path, monkeypatch):
+        result, captured = self._run(tmp_path, monkeypatch, "--dashboard", "--port", "9001")
+        assert result.exit_code == 0, plain(result)
+        assert "Dashboard at http://127.0.0.1:9001/dashboard/" in plain(result)
+        assert TestClient(captured["app"]).get("/dashboard/").status_code == 200
+
+    def test_nothing_is_mounted_or_announced_by_default(self, tmp_path, monkeypatch):
+        result, captured = self._run(tmp_path, monkeypatch)
+        assert result.exit_code == 0, plain(result)
+        assert "Dashboard at" not in plain(result)
+        assert TestClient(captured["app"]).get("/dashboard/").status_code == 404
+
+    def test_a_non_loopback_bind_is_refused_before_a_port_is_opened(self, tmp_path, monkeypatch):
+        # Two opt-ins, not one. Turning the dashboard on is one decision;
+        # putting it on a network is a different and larger one.
+        result, captured = self._run(tmp_path, monkeypatch, "--dashboard", "--host", "0.0.0.0")
+        assert result.exit_code != 0
+        assert captured == {}, "uvicorn was started despite the refusal"
+        message = plain(result)
+        assert "would put the dashboard on your network" in message
+        assert "--dashboard-allow-remote" in message
+
+    def test_the_second_opt_in_permits_it(self, tmp_path, monkeypatch):
+        result, captured = self._run(
+            tmp_path, monkeypatch, "--dashboard", "--host", "0.0.0.0", "--dashboard-allow-remote"
+        )
+        assert result.exit_code == 0, plain(result)
+        assert captured["host"] == "0.0.0.0"
+        assert TestClient(captured["app"]).get("/dashboard/").status_code == 200
+
+    def test_a_non_loopback_bind_without_the_dashboard_is_untouched(self, tmp_path, monkeypatch):
+        # The guard is about the dashboard, not about binding. Serving the agent
+        # itself on 0.0.0.0 was already an explicit choice and stays allowed.
+        result, captured = self._run(tmp_path, monkeypatch, "--host", "0.0.0.0")
+        assert result.exit_code == 0, plain(result)
+        assert captured["host"] == "0.0.0.0"
+
+    def test_localhost_by_name_counts_as_loopback(self, tmp_path, monkeypatch):
+        result, _ = self._run(tmp_path, monkeypatch, "--dashboard", "--host", "localhost")
+        assert result.exit_code == 0, plain(result)
+
+    def test_a_custom_mount_path_reaches_the_application(self, tmp_path, monkeypatch):
+        result, captured = self._run(
+            tmp_path, monkeypatch, "--dashboard", "--dashboard-path", "/ops"
+        )
+        assert result.exit_code == 0, plain(result)
+        assert "Dashboard at http://127.0.0.1:8000/ops/" in plain(result)
+        assert TestClient(captured["app"]).get("/ops/").status_code == 200

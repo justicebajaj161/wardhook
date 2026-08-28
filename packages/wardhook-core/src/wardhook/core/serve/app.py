@@ -11,6 +11,11 @@ Three endpoints are exposed:
 * ``GET  /health`` -- liveness probe for orchestrators.
 * ``GET  /info``   -- the agent's configuration, for debugging a deployment.
 
+A fourth thing can be mounted alongside them, and is off until asked for: the
+read-only dashboard from :mod:`wardhook.core.serve.dashboard`. It is opt-in
+because a governance tool must never ship a debug UI that becomes reachable in
+production because nobody turned it off.
+
 Guardrail decisions surface in the response as structured records, and a run
 blocked by policy returns ``200`` with ``blocked: true`` rather than an error
 status. A blocked request is a *successful* policy evaluation, not a server
@@ -25,6 +30,9 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+from wardhook.core.serve.dashboard import create_dashboard, dashboard_enabled
+from wardhook.core.serve.topology import describe_agent
 
 __all__ = ["InvokeRequest", "InvokeResponse", "create_app"]
 
@@ -68,36 +76,15 @@ class InvokeResponse(BaseModel):
     tool_calls: list[str] = Field(default_factory=list)
 
 
-def _describe(agent: Any) -> dict[str, Any]:
-    """Summarise an agent's configuration for the ``/info`` endpoint.
-
-    Every field is read defensively, because the served object may be a plain
-    callable rather than an :class:`~wardhook.core.agent.AgentGraph`.
-
-    Args:
-        agent: The served agent.
-
-    Returns:
-        A JSON-serialisable summary. Never includes credentials.
-    """
-    tools = getattr(agent, "tools", []) or []
-    guardrails = getattr(agent, "guardrails", []) or []
-    return {
-        "name": getattr(agent, "name", type(agent).__name__),
-        "type": type(agent).__name__,
-        "tools": [getattr(t, "name", str(t)) for t in tools],
-        "guardrails": [str(getattr(g, "name", type(g).__name__)) for g in guardrails],
-        "retrieval_enabled": getattr(agent, "retriever", None) is not None,
-        "telemetry_enabled": getattr(agent, "telemetry", None) is not None,
-    }
-
-
 def create_app(
     agent: Any,
     *,
     title: str = "Wardhook Agent",
     version: str = "0.1.0",
     cors_origins: list[str] | None = None,
+    dashboard: bool | None = None,
+    dashboard_path: str = "/dashboard",
+    telemetry: Any = None,
 ) -> FastAPI:
     """Wrap an agent in a FastAPI application.
 
@@ -109,6 +96,14 @@ def create_app(
             ``WARDHOOK_CORS_ORIGINS`` environment variable, or no CORS at all.
             CORS is off unless explicitly configured, so an agent is never
             browser-reachable from arbitrary origins by accident.
+        dashboard: Whether to mount the read-only dashboard. Defaults to the
+            ``WARDHOOK_DASHBOARD`` environment variable, and to off. It follows
+            the same rule as ``cors_origins``: a feature that widens what the
+            server exposes is never on unless somebody said so.
+        dashboard_path: Where to mount it.
+        telemetry: The sink the dashboard reads runs from. Defaults to the
+            agent's own. Pass a shared trace store to see every worker's runs
+            rather than one process's.
 
     Returns:
         The configured application.
@@ -156,7 +151,7 @@ def create_app(
         Returns:
             A small status payload suitable for a liveness probe.
         """
-        return {"status": "ok", "agent": str(_describe(agent)["name"])}
+        return {"status": "ok", "agent": str(describe_agent(agent)["name"])}
 
     @app.get("/info", tags=["ops"])
     def info() -> dict[str, Any]:
@@ -165,7 +160,7 @@ def create_app(
         Returns:
             Tool names, guardrail names, and which optional features are on.
         """
-        return _describe(agent)
+        return describe_agent(agent)
 
     @app.post("/invoke", response_model=InvokeResponse, tags=["agent"])
     def invoke(request: InvokeRequest) -> InvokeResponse:
@@ -207,5 +202,8 @@ def create_app(
             guardrail_events=list(result.get("guardrail_events") or []),
             tool_calls=list(result.get("tool_calls") or []),
         )
+
+    if dashboard_enabled(dashboard):
+        app.mount(dashboard_path, create_dashboard(agent, telemetry))
 
     return app

@@ -42,6 +42,8 @@ three quarters of the data is worse than one that says so.
 
 from __future__ import annotations
 
+import ipaddress
+import os
 from collections.abc import Sequence
 from html import escape
 from typing import Any
@@ -49,10 +51,9 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
-from wardhook.core.serve.app import _describe
-from wardhook.core.serve.topology import read_topology, render_svg
+from wardhook.core.serve.topology import describe_agent, read_topology, render_svg
 
-__all__ = ["create_dashboard"]
+__all__ = ["create_dashboard", "dashboard_enabled", "is_loopback"]
 
 _PAGE_TITLE = "Wardhook Dashboard"
 
@@ -85,6 +86,10 @@ _MODE_NOTES: dict[str, str] = {
 # unusable on exactly the deployment that needs it most.
 _MAX_LIMIT = 1000
 _DEFAULT_LIMIT = 100
+
+# Environment-variable values that count as yes. Anything else, including an
+# unset variable, leaves the dashboard off.
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 
 # Copied from `wardhook.observability.viewer.html`, not imported from it.
@@ -631,7 +636,7 @@ def _render_page(agent: Any, sink: Any) -> str:
         >>> "http" + "://" in page
         False
     """
-    described = _describe(agent)
+    described = describe_agent(agent)
     name = str(described["name"])
     mode = _sink_mode(sink)
     script = f"<script>{_SCRIPT}</script>" if mode != "none" else ""
@@ -750,8 +755,8 @@ def create_dashboard(agent: Any, telemetry: Any = None) -> FastAPI:
             with no retriever genuinely reports no retrieval node.
         """
         return {
-            "agent": str(_describe(agent)["name"]),
-            "config": _describe(agent),
+            "agent": str(describe_agent(agent)["name"]),
+            "config": describe_agent(agent),
             **read_topology(agent).to_dict(),
         }
 
@@ -811,3 +816,55 @@ def create_dashboard(agent: Any, telemetry: Any = None) -> FastAPI:
         return _project_trace(trace)
 
     return app
+
+
+def dashboard_enabled(explicit: bool | None = None) -> bool:
+    """Decide whether the dashboard should be mounted.
+
+    Enabling is always a decision someone made. There is no configuration in
+    which a debug UI becomes reachable because a default moved underneath a
+    deployment -- that is the failure this function exists to prevent.
+
+    Args:
+        explicit: ``True`` or ``False`` to decide directly, or ``None`` to read
+            the ``WARDHOOK_DASHBOARD`` environment variable.
+
+    Returns:
+        Whether to mount the dashboard. ``False`` unless something says
+        otherwise.
+
+    Example:
+        >>> dashboard_enabled(True), dashboard_enabled(False)
+        (True, False)
+    """
+    if explicit is not None:
+        return explicit
+    return os.getenv("WARDHOOK_DASHBOARD", "").strip().lower() in _TRUTHY
+
+
+def is_loopback(host: str) -> bool:
+    """Report whether a bind address is reachable only from this machine.
+
+    Anything that is not recognisably a loopback address is treated as remote,
+    including a hostname that might well resolve to one. That is deliberate: the
+    cost of being wrong in one direction is an extra flag, and in the other it is
+    a debug UI exposed to a network.
+
+    Args:
+        host: The interface a server would bind to.
+
+    Returns:
+        Whether the address is loopback.
+
+    Example:
+        >>> is_loopback("127.0.0.1"), is_loopback("::1"), is_loopback("localhost")
+        (True, True, True)
+        >>> is_loopback("0.0.0.0"), is_loopback("db.internal"), is_loopback("")
+        (False, False, False)
+    """
+    if host.strip().lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip()).is_loopback
+    except ValueError:
+        return False

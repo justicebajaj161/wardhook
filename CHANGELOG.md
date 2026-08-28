@@ -21,6 +21,15 @@ All four packages are versioned in lockstep while the project is pre-1.0.
   `TopologyNode` and `TopologyEdge` records it returns. Anything without a
   graph — a plain callable with `.invoke()` is a supported target — reports
   `available=False` with a reason rather than raising.
+- **`wardhook serve --dashboard`**, plus `create_app(dashboard=True)` and
+  `WARDHOOK_DASHBOARD=1`. Off unless asked for; serving it on a non-loopback
+  interface requires a second, separate `--dashboard-allow-remote`, and the
+  refusal names the flag. `--dashboard-path` moves the mount point.
+- **`wardhook.core.serve.describe_agent(agent)`**, which is the old private
+  `_describe` from `serve/app.py`, moved beside `read_topology` and made public.
+  Both answer "what is this agent, as plain data", and the application and the
+  dashboard both need it — keeping it in either one would have made them import
+  each other.
 - **The trace overlay.** Picking a run shades each node by how long it took and
   writes its tokens and cost underneath, so the architecture diagram and the
   bill are one picture. A node visited more than once — `call_model` on every

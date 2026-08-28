@@ -122,6 +122,51 @@ result["guardrail_events"]  # every policy decision, with no PII in the record
 agent.trace()  # per-node tokens, cost, and latency
 ```
 
+## The local dashboard
+
+```bash
+wardhook serve myapp.agents:support_agent --dashboard
+# Serving myapp.agents:support_agent on http://127.0.0.1:8000  (docs at /docs)
+# Dashboard at http://127.0.0.1:8000/dashboard/
+```
+
+One page, served from your own process, showing the agent's real graph with each
+node shaded by what it actually cost. Nothing is fetched from a CDN and no trace
+leaves the machine — the whole page is a few kilobytes of inlined HTML, CSS and
+SVG, and it works with the network unplugged.
+
+The diagram is derived from the compiled graph, so it is accurate to your
+configuration rather than to a template: an agent with no retriever has no
+`retrieve` box. Picking a run shades each node by its latency and writes its
+tokens and cost underneath. A node visited more than once — `call_model`, on
+every tool round trip — is totalled, so what a box says reconciles with the run
+totals above it.
+
+**It shows telemetry and configuration. It never shows content.** No prompt, no
+model output, no retrieved chunk, no guardrail event body. That is not a filter
+applied on the way out: the telemetry model has no such fields, and the API's
+projection is an explicit allowlist with a test proving a content field added
+upstream cannot start being served by accident. When you need the text behind a
+cost, the page gives you the run's `run_id` — the same id that is on every audit
+record you write — and you look it up in **your** audit log, where your
+redaction and retention policy already apply.
+
+**It is off by default and takes two opt-ins to reach a network.** Enabling it is
+explicit (`--dashboard`, `WARDHOOK_DASHBOARD=1`, or `create_app(dashboard=True)`);
+serving it on anything other than a loopback interface additionally requires
+`--dashboard-allow-remote`. A governance tool must not ship a debug UI that
+becomes reachable in production because nobody turned it off.
+
+**Under multiple workers it sees one worker's traffic.** Each process owns its
+own in-memory tracer, so `--workers 4` means roughly a quarter of the runs. The
+page says which mode it is in rather than quietly under-reporting; point the
+tracer at a shared `JSONLTraceStore` and hand that store to
+`create_app(telemetry=store)` to see everything.
+
+There is also a JSON API under the same mount — `/api/topology`, `/api/runs`,
+`/api/runs/{run_id}` — if you would rather build your own view. `/api/topology`
+includes Mermaid source for the same graph.
+
 ## How it composes without coupling
 
 The interesting constraint is that `AgentGraph(guardrails=[...], telemetry=True)`
@@ -184,7 +229,7 @@ Pre-1.0 and built in the open. All four packages are complete.
 
 | Package | Status | Tests | Coverage |
 | --- | --- | --- | --- |
-| wardhook-core | ✅ Complete | 299 | 100% |
+| wardhook-core | ✅ Complete | 317 | 100% |
 | wardhook-guardrails | ✅ Complete | 222 | 100% |
 | wardhook-observability | ✅ Complete | 162 | 100% |
 | wardhook-evals | ✅ Complete | 170 | 100% |

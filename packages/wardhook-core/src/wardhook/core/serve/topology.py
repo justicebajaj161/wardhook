@@ -38,6 +38,7 @@ __all__ = [
     "Topology",
     "TopologyEdge",
     "TopologyNode",
+    "describe_agent",
     "layout",
     "read_topology",
     "render_svg",
@@ -596,3 +597,38 @@ def render_svg(topology: Topology) -> str:
         f'<g class="nodes">{"".join(groups)}</g>'
         f"</svg>"
     )
+
+
+def describe_agent(agent: Any) -> dict[str, Any]:
+    """Summarise an agent's configuration as plain data.
+
+    The companion to :func:`read_topology`: that answers *what shape is this
+    agent*, and this answers *what is attached to it*. Both read the agent
+    defensively, because the served object may be a plain callable rather than
+    an :class:`~wardhook.core.agent.AgentGraph`.
+
+    It lives here rather than beside the HTTP application because both the
+    application and the dashboard need it, and a shared helper owned by one of
+    them would make the two import each other.
+
+    Args:
+        agent: The agent to describe.
+
+    Returns:
+        A JSON-serialisable summary. Never includes credentials, and never
+        anything the agent processed -- only how it is configured.
+
+    Example:
+        >>> describe_agent(object())["tools"]
+        []
+    """
+    tools = getattr(agent, "tools", []) or []
+    guardrails = getattr(agent, "guardrails", []) or []
+    return {
+        "name": getattr(agent, "name", type(agent).__name__),
+        "type": type(agent).__name__,
+        "tools": [getattr(t, "name", str(t)) for t in tools],
+        "guardrails": [str(getattr(g, "name", type(g).__name__)) for g in guardrails],
+        "retrieval_enabled": getattr(agent, "retriever", None) is not None,
+        "telemetry_enabled": getattr(agent, "telemetry", None) is not None,
+    }

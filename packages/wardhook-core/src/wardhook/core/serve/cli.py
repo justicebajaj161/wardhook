@@ -104,11 +104,34 @@ def serve(
         list[str] | None,
         typer.Option("--cors-origin", help="Allowed CORS origin. Repeatable."),
     ] = None,
+    dashboard: Annotated[
+        bool,
+        typer.Option(
+            "--dashboard/--no-dashboard",
+            help="Serve the read-only dashboard alongside the agent.",
+            envvar="WARDHOOK_DASHBOARD",
+        ),
+    ] = False,
+    dashboard_path: Annotated[
+        str, typer.Option("--dashboard-path", help="Where to mount the dashboard.")
+    ] = "/dashboard",
+    dashboard_allow_remote: Annotated[
+        bool,
+        typer.Option(
+            "--dashboard-allow-remote",
+            help="Permit the dashboard on a non-loopback bind. Say it on purpose.",
+        ),
+    ] = False,
 ) -> None:
     """Serve an agent over HTTP.
 
     Binds to localhost by default. Serving on ``0.0.0.0`` exposes the agent to
     your whole network, so that has to be an explicit choice.
+
+    The dashboard is off unless asked for, and asking for it on a non-loopback
+    interface takes a second, separate flag. Two opt-ins rather than one is not
+    ceremony: a governance tool that ships a debug UI reachable in production by
+    accident has undone the thing it was installed to do.
 
     Args:
         target: The agent to serve, as ``module:attribute``.
@@ -117,15 +140,40 @@ def serve(
         reload: Whether to restart on code changes.
         log_level: Uvicorn log level.
         cors_origin: Allowed CORS origins; may be repeated.
+        dashboard: Whether to mount the read-only dashboard.
+        dashboard_path: Where to mount it.
+        dashboard_allow_remote: Whether the dashboard may be served on a
+            non-loopback bind.
+
+    Raises:
+        typer.BadParameter: If the dashboard is requested on a non-loopback
+            interface without ``--dashboard-allow-remote``.
     """
     import uvicorn
 
     from wardhook.core.serve.app import create_app
+    from wardhook.core.serve.dashboard import is_loopback
+
+    if dashboard and not is_loopback(host) and not dashboard_allow_remote:
+        raise typer.BadParameter(
+            f"--dashboard on --host {host!r} would put the dashboard on your "
+            f"network, not just this machine. It shows telemetry and "
+            f"configuration only -- never prompts or model output -- but it "
+            f"still describes how your agent is wired. Bind to 127.0.0.1, or "
+            f"add --dashboard-allow-remote to say you meant it."
+        )
 
     agent = load_target(target)
-    application = create_app(agent, cors_origins=list(cors_origin) if cors_origin else None)
+    application = create_app(
+        agent,
+        cors_origins=list(cors_origin) if cors_origin else None,
+        dashboard=dashboard,
+        dashboard_path=dashboard_path,
+    )
 
     typer.echo(f"Serving {target} on http://{host}:{port}  (docs at /docs)")
+    if dashboard:
+        typer.echo(f"Dashboard at http://{host}:{port}{dashboard_path}/")
     uvicorn.run(application, host=host, port=port, reload=reload, log_level=log_level)
 
 
@@ -143,9 +191,9 @@ def info(
     """
     import json
 
-    from wardhook.core.serve.app import _describe
+    from wardhook.core.serve.topology import describe_agent
 
-    typer.echo(json.dumps(_describe(load_target(target)), indent=2))
+    typer.echo(json.dumps(describe_agent(load_target(target)), indent=2))
 
 
 def main() -> None:
