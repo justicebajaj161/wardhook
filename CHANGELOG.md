@@ -9,6 +9,10 @@ All four packages are versioned in lockstep while the project is pre-1.0.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.1] — 2026-08-27
+
 A pre-launch audit of every checkable claim in the README, plus the fixes it
 turned up. No public API changed shape; two behaviours that silently produced
 empty output now produce the right output.
@@ -147,5 +151,6 @@ are versioned in lockstep until it settles.
   1.30.0 and 1.32.0 emit `Metadata-Version: 2.5`, which `packaging` rejects, so
   wheels built with them cannot be published.
 
-[Unreleased]: https://github.com/justicebajaj161/wardhook/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/justicebajaj161/wardhook/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/justicebajaj161/wardhook/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/justicebajaj161/wardhook/releases/tag/v0.1.0

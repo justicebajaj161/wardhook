@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wardhook-guardrails"
-version = "0.1.0"
+version = "0.1.1"
 description = "Config-driven PII redaction, prompt-injection detection, tool-call RBAC, and compliance-grade audit logging for LLM agents."
 readme = "README.md"
 license = { file = "LICENSE" }

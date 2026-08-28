@@ -20,7 +20,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wardhook"
-version = "0.1.0"
+version = "0.1.1"
 description = "Governance and observability for LangGraph agents: installs all four Wardhook packages."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -49,23 +49,23 @@ classifiers = [
 # usefully make. Anyone wanting to mix versions should depend on the individual
 # packages directly, which is the supported path and always has been.
 dependencies = [
-    "wardhook-core==0.1.0",
-    "wardhook-guardrails==0.1.0",
-    "wardhook-observability==0.1.0",
-    "wardhook-evals==0.1.0",
+    "wardhook-core==0.1.1",
+    "wardhook-guardrails==0.1.1",
+    "wardhook-observability==0.1.1",
+    "wardhook-evals==0.1.1",
 ]
 
 [project.optional-dependencies]
 # Pass-throughs, so `pip install wardhook[anthropic]` works the way someone
 # would expect without them having to know which package owns the extra.
-anthropic = ["wardhook-core[anthropic]==0.1.0"]
-openai = ["wardhook-core[openai]==0.1.0"]
-google = ["wardhook-core[google]==0.1.0"]
-chroma = ["wardhook-core[chroma]==0.1.0"]
-judge = ["wardhook-evals[judge]==0.1.0"]
+anthropic = ["wardhook-core[anthropic]==0.1.1"]
+openai = ["wardhook-core[openai]==0.1.1"]
+google = ["wardhook-core[google]==0.1.1"]
+chroma = ["wardhook-core[chroma]==0.1.1"]
+judge = ["wardhook-evals[judge]==0.1.1"]
 all = [
-    "wardhook-core[all]==0.1.0",
-    "wardhook-evals[judge]==0.1.0",
+    "wardhook-core[all]==0.1.1",
+    "wardhook-evals[judge]==0.1.1",
 ]
 
 [project.urls]

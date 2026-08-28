@@ -54,7 +54,7 @@ from wardhook.observability.store import JSONLTraceStore, load_traces
 from wardhook.observability.tracer import Tracer
 from wardhook.observability.viewer.html import render_html
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "PRICES",

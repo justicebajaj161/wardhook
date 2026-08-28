@@ -44,7 +44,7 @@ from wardhook.guardrails.injection import (
 from wardhook.guardrails.pii import PIIDetector, PIIMatch, PIIRedactor, RedactionResult
 from wardhook.guardrails.rbac import RoleBasedToolPolicy, ToolPermission
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "BUILTIN_PACKS",
