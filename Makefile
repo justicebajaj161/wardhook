@@ -12,7 +12,7 @@ ALL_PACKAGES := $(PACKAGES) wardhook
 PY ?= python3
 
 .DEFAULT_GOAL := help
-.PHONY: help install lint fmt types test test-cov solo meta build clean check
+.PHONY: help install lint fmt types test test-cov cov-table solo meta build clean check
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -39,8 +39,12 @@ types: ## Type-check every package independently
 test: ## Run every package's test suite
 	uv run pytest
 
-test-cov: ## Run tests with a coverage report
+test-cov: ## Run tests with a coverage report, failing under the threshold
+	# fail_under lives in pyproject.toml so this and CI cannot disagree.
 	uv run pytest --cov --cov-report=term-missing
+
+cov-table: ## Print the README's status table from a real coverage run
+	@./scripts/coverage-table.sh
 
 solo: ## Prove each package installs and passes its tests entirely on its own
 	# Deliberately mirrors the `test` job in .github/workflows/ci.yml exactly:
@@ -90,4 +94,4 @@ meta: ## Prove `pip install wardhook` pulls in all four packages
 		print('==> pip install wardhook -> ' + ', '.join(sorted(seen)) + ' all at ' + seen['wardhook'])"; \
 	rm -rf .venv-meta
 
-check: lint types test ## Run the full local gate (lint + types + tests)
+check: lint types test-cov ## Run the full local gate (lint + types + coverage-gated tests)

@@ -20,7 +20,7 @@
 - [ ] New behaviour has tests; a fixed bug has a regression test
 - [ ] Public functions and classes have Google-style docstrings
 - [ ] **No new cross-package import.** A package must still work with none of
-      the others installed — see `tests/test_isolation.py`
+      the others installed — see `packages/<package>/tests/test_isolation.py`
 - [ ] No credentials, real PII, or customer data anywhere in the diff
 - [ ] `CHANGELOG.md` updated under `[Unreleased]` if user-facing
 

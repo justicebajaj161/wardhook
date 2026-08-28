@@ -353,10 +353,13 @@ class AuditLogger:
         """Record a guardrail result, deriving the diff automatically.
 
         Args:
-            result: Anything with ``action``, ``name``, ``rule``, ``reason``
-                and ``severity`` attributes -- typically a
+            result: Anything carrying ``action``, ``name``/``guardrail``,
+                ``rule``, ``reason`` and ``severity`` -- typically a
                 :class:`~wardhook.guardrails.base.GuardrailResult`, but read
-                structurally so results from other packages work too.
+                structurally so results from other packages work too. A plain
+                mapping is read by key, so one of ``wardhook-core``'s
+                ``guardrail_events`` entries can be passed directly. Use
+                :meth:`record_run` for a whole list of them.
             stage: ``input``, ``output`` or ``tool_call``.
             run_id: Correlation id for the agent invocation.
             before: Text before the guardrail ran, for the diff.
@@ -367,25 +370,42 @@ class AuditLogger:
         Returns:
             The recorded event.
         """
-        action = getattr(result, "action", "allow")
+
+        # A Mapping is read by key and everything else by attribute. Core's
+        # `guardrail_events` are dicts, and reaching for record() with one is
+        # the obvious mistake: getattr finds nothing on a dict, so every event
+        # would degrade to an "allow" and then be dropped by record_allows,
+        # leaving an empty audit trail and no error. record_run() is still the
+        # right call for a whole list; this makes the single-event case safe.
+        def read(name: str, default: Any) -> Any:
+            if isinstance(result, Mapping):
+                value = result.get(name, default)
+                return default if value is None else value
+            return getattr(result, name, default)
+
+        action = read("action", "allow")
         action_value = getattr(action, "value", action)
-        severity = getattr(result, "severity", "low")
+        severity = read("severity", "low")
         severity_value = getattr(severity, "value", severity)
-        details = dict(getattr(result, "details", None) or {})
+        details = dict(read("details", None) or {})
 
         diff: TextDiff | None = None
         if before is not None:
-            resolved_after = after if after is not None else getattr(result, "text", before)
+            resolved_after = after if after is not None else read("text", before)
             diff = diff_text(before, resolved_after, details.get("spans", ()))
 
+        # A result object names itself `name`; an event dict names it
+        # `guardrail`, which is the key core writes.
+        guardrail = read("name", None) or read("guardrail", "guardrail")
+
         return self.log(
-            guardrail=str(getattr(result, "name", "guardrail")),
+            guardrail=str(guardrail),
             action=str(action_value),
             stage=stage,
             run_id=run_id,
-            rule=getattr(result, "rule", None),
+            rule=read("rule", None),
             severity=str(severity_value),
-            reason=getattr(result, "reason", None),
+            reason=read("reason", None),
             principal_id=principal_id,
             tool=tool,
             diff=diff,
@@ -457,6 +477,10 @@ class AuditLogger:
             events: Events to summarise. Defaults to the retained in-memory
                 events.
 
+        Entity counts are read from each event's recorded diff, falling back to
+        the guardrail's own details. A caller who does not pass ``before`` to
+        :meth:`record` still gets a populated ``by_entity``.
+
         Returns:
             Counts by action, stage, guardrail, severity and entity, plus the
             number of distinct runs touched and the time span covered.
@@ -470,9 +494,16 @@ class AuditLogger:
                 counts[value] = counts.get(value, 0) + 1
             return dict(sorted(counts.items()))
 
+        # Entity counts come from the diff when one was recorded, and otherwise
+        # from the event's own details. The guardrail always reports what it
+        # matched; only the diff is conditional on the caller passing `before`.
+        # Reading the diff alone left `by_entity` empty for every caller who
+        # did not -- an empty tally on a run that redacted two entities reads
+        # as a broken summary rather than an omitted argument.
         entities: dict[str, int] = {}
         for event in source:
-            for entity, count in ((event.diff or {}).get("entities") or {}).items():
+            counted = (event.diff or {}).get("entities") or (event.details or {}).get("entities")
+            for entity, count in (counted or {}).items():
                 entities[entity] = entities.get(entity, 0) + int(count)
 
         timestamps = sorted(e.timestamp for e in source)

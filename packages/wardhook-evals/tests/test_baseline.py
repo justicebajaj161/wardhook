@@ -105,3 +105,47 @@ class TestFiles:
 
         comparison = compare_files(tmp_path / "run.json", tmp_path / "baseline.json")
         assert comparison.has_regressions
+
+
+class TestComparisonSerialisation:
+    def test_a_comparison_carries_both_sides_and_the_detail(self, make_report):
+        baseline = make_report(c1=True)
+        current = make_report(c1=False)
+
+        (item,) = compare(current, baseline).comparisons
+        record = item.to_dict()
+
+        assert record["change"] == "regressed"
+        assert record["baseline_passed"] is True
+        assert record["current_passed"] is False
+
+    def test_an_added_case_has_no_baseline_side(self, make_report):
+        (item,) = compare(make_report(c1=True), make_report()).comparisons
+        record = item.to_dict()
+
+        assert record["change"] == "added"
+        assert "baseline_passed" not in record
+
+    def test_a_removed_case_has_no_current_side(self, make_report):
+        # A case deleted from the suite is not a pass and not a failure. It is
+        # its own outcome, or a shrinking suite silently looks like progress.
+        (item,) = compare(make_report(), make_report(c1=True)).comparisons
+        record = item.to_dict()
+
+        assert record["change"] == "removed"
+        assert "current_passed" not in record
+        assert record["baseline_passed"] is True
+
+
+class TestUnchangedCases:
+    def test_cases_that_passed_before_and_pass_now_are_listed_as_unchanged(self, make_report):
+        comparison = compare(make_report(c1=True, c2=False), make_report(c1=True, c2=False))
+
+        assert [item.id for item in comparison.unchanged] == ["c1"]
+        assert [item.id for item in comparison.still_failing] == ["c2"]
+
+    def test_an_unchanged_run_reports_no_regressions(self, make_report):
+        comparison = compare(make_report(c1=True), make_report(c1=True))
+
+        assert comparison.has_regressions is False
+        assert comparison.unchanged

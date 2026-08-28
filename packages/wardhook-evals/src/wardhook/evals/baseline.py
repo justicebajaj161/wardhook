@@ -231,7 +231,9 @@ def compare(current: EvalReport, baseline: EvalReport) -> BaselineComparison:
             comparisons.append(
                 CaseComparison(
                     id=case_id,
-                    change=Change.REMOVED,
+                    # Classified rather than hardcoded, so _classify stays the
+                    # single definition of what each transition means.
+                    change=_classify(before.passed, None),
                     baseline_passed=before.passed,
                     current_passed=None,
                 )

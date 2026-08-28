@@ -9,7 +9,58 @@ All four packages are versioned in lockstep while the project is pre-1.0.
 
 ## [Unreleased]
 
-Nothing yet.
+A pre-launch audit of every checkable claim in the README, plus the fixes it
+turned up. No public API changed shape; two behaviours that silently produced
+empty output now produce the right output.
+
+### Fixed
+
+- **`AuditLogger.record()` accepts a mapping.** `wardhook-core` returns its
+  `guardrail_events` as dicts, but `record()` read its argument with `getattr`,
+  which finds nothing on a dict. Every event degraded to an `allow` and was
+  then discarded by the default `record_allows=False` — an empty audit trail,
+  with no error, from the most obvious way to write one. Mappings are now read
+  by key. `record_run()` remains the right call for a whole list.
+- **`AuditLogger.report()` counts entities without a diff.** `by_entity` was
+  read only from a recorded diff, which exists only when the caller passes
+  `before=`. The README's own quickstart does not, so it printed
+  `'by_entity': {}` on a run that had just redacted two entities. The count now
+  falls back to the guardrail's own details, which already carried it.
+- **`wardhook-core[google]` exists.** `resolve_model()` maps a `gemini-` prefix
+  to `langchain-google-genai` and its error told you to install that extra, but
+  no such extra was declared — so `pip install "wardhook-core[google]"` warned,
+  installed nothing, and left you facing the identical error. Added to
+  `wardhook-core`, to its `all`, and as a pass-through on the meta-package.
+- **`.env.example` described four variables that do not exist.**
+  `WARDHOOK_ENTITY_PACK`, `WARDHOOK_AUDIT_LOG`, `WARDHOOK_TRACE_DIR` and
+  `WARDHOOK_PRICING_FILE` appeared nowhere in any source file, and
+  `WARDHOOK_TARGET` — which the `Dockerfile` does read — was missing. The file
+  now lists exactly what is read, and says why the others are constructor
+  arguments rather than ambient environment state.
+
+### Added
+
+- **Coverage is 100% and gated.** `fail_under = 100` (branch coverage) fails
+  the build on a drop, so the README's status table cannot drift from reality.
+  The gaps this closed were real, not cosmetic: `AgentGraph.ainvoke`, the whole
+  PDF loading path, `wardhook serve` and `wardhook info`, multi-block message
+  content, provider-client construction failures, and the tracer's cross-thread
+  paths all had no test at all.
+- **`make cov-table`** regenerates the README's status table from a real run,
+  so a reviewer can reproduce the numbers instead of trusting them.
+- **Cross-package composition tests** in `tests/`, which the directory had
+  promised in its docstring while containing none. They assert the claim the
+  README leads with — guardrails, telemetry, and evals driving a core agent
+  with no import between them — which no single package's suite can reach.
+- `.github/ISSUE_TEMPLATE/config.yml`, disabling blank issues and pointing
+  security reports at a private advisory.
+
+### Changed
+
+- `make check` now runs the coverage-gated suite, so it stays the same gate CI
+  runs, as the README says it is.
+- The README marks which quickstart block runs as-is and which sketches an
+  integration; the second needs a `policy.md` and tools that are yours.
 
 ## [0.1.0] — 2026-08-27
 
@@ -65,11 +116,13 @@ are versioned in lockstep until it settles.
 - **Examples** — one runnable script per package plus `combined_agent.py` using
   all four, with shared fixtures in `examples/data/`. Every example runs offline
   against a fake model and needs no API key; CI executes all five on each push.
-- **Release tooling** — `.github/workflows/release.yml` publishes all four
+- **Release tooling** — `.github/workflows/release.yml` publishes all five
   packages to PyPI on a version tag using Trusted Publishing, so no API token is
   stored in this repository. It re-runs the full gate before building and
   refuses to publish if the tag and the declared versions disagree.
-  `scripts/bump-version.sh` sets all eight version declarations at once.
+  `scripts/bump-version.sh` sets every version declaration at once -- each
+  package's `pyproject.toml` and `__version__`, plus the meta-package's own
+  version and each of its exact pins, including the ones inside extras.
 - **wardhook** — a meta-package containing no code, so `pip install wardhook`
   brings in all four packages at matching versions. Extras pass through to
   whichever package owns them (`wardhook[anthropic]`, `[openai]`, `[chroma]`,

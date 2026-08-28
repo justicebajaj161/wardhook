@@ -65,12 +65,14 @@ pip install wardhook                 # a meta-package; installs the four above
 Nothing changes for the others either way. `wardhook` contains no code — it
 exists so you can write one line instead of four, and it pins each package to an
 exact version so `wardhook==0.1.0` means precisely the 0.1.0 set. Provider
-clients ride along as extras: `wardhook[anthropic]`, `[openai]`, `[chroma]`,
-`[judge]`, `[all]`.
+clients ride along as extras: `wardhook[anthropic]`, `[openai]`, `[google]`,
+`[chroma]`, `[judge]`, `[all]`.
 
 ## Quickstart
 
-Guardrails on their own, with no agent framework anywhere:
+Guardrails on their own, with no agent framework anywhere. This runs exactly as
+written after `pip install wardhook-guardrails`, including the output in the
+comments:
 
 ```python
 from wardhook.guardrails import PIIRedactor, AuditLogger
@@ -84,7 +86,11 @@ print(result.text)  # 'Patient [MRN], contact [EMAIL]'
 print(audit.report())  # counts by action, stage, guardrail, severity, entity
 ```
 
-All four composed into one governed, traced, testable agent:
+All four composed into one governed, traced, testable agent. Unlike the block
+above, this one sketches an integration rather than running as-is: `policy.md`,
+`lookup_claim` and `issue_refund` are yours, and `model="claude-opus-5"` needs
+`pip install "wardhook[anthropic]"` plus a key. For a version that runs right
+now with no key and no setup, see [`examples/combined_agent.py`](examples/combined_agent.py).
 
 ```python
 from wardhook.core import AgentGraph, InMemoryVectorStore, Retriever, chunk_text
@@ -178,11 +184,19 @@ Pre-1.0 and built in the open. All four packages are complete.
 
 | Package | Status | Tests | Coverage |
 | --- | --- | --- | --- |
-| wardhook-core | ✅ Complete | 163 | 92% |
-| wardhook-guardrails | ✅ Complete | 196 | 98% |
-| wardhook-observability | ✅ Complete | 127 | 96% |
-| wardhook-evals | ✅ Complete | 143 | 95% |
+| wardhook-core | ✅ Complete | 214 | 100% |
+| wardhook-guardrails | ✅ Complete | 222 | 100% |
+| wardhook-observability | ✅ Complete | 162 | 100% |
+| wardhook-evals | ✅ Complete | 170 | 100% |
 | wardhook (meta) | ✅ Complete | — | n/a |
+
+Those numbers are generated, not transcribed: `make cov-table` reproduces this
+table from a real run, and CI fails the build if coverage drops below 100%.
+A further 11 cross-package tests in [`tests/`](tests) exercise the composition
+itself, which no single package's suite can reach.
+Coverage is **branch** coverage, which reads lower than line coverage. The few
+genuinely unreachable defensive branches carry a `pragma: no cover` naming why,
+rather than being deleted to flatter the number.
 
 All five distributions are on PyPI as of 0.1.0. Releases run through
 [PyPI Trusted Publishing](docs/releasing.md) on a version tag — there is no API
@@ -199,9 +213,10 @@ cd wardhook && uv sync && make check
 
 ```bash
 make install    # create the dev environment with all four packages editable
-make check      # lint + type-check + test, the same gate CI runs
+make check      # lint + type-check + coverage-gated test, the gate CI runs
 make solo       # prove each package installs and passes its suite entirely alone
-make build      # wheels and sdists for all four, validated with twine
+make cov-table  # regenerate the Project status table above from a real run
+make build      # wheels and sdists for all five, validated with twine
 ```
 
 The whole test suite runs **fully offline against fake models**. No API key is

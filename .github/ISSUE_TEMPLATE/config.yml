@@ -1,0 +1,14 @@
+# Blank issues are disabled so a report arrives with the context needed to act
+# on it. The link below covers the one case the templates deliberately exclude.
+#
+# There is no Discussions link here because Discussions is not enabled on this
+# repository; adding one would put a 404 in the issue chooser.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/justicebajaj161/wardhook/security/advisories/new
+    about: >-
+      Guardrail bypasses, audit-log leakage, and RBAC failures go through a
+      private advisory, never the public tracker. SECURITY.md draws the line
+      between a vulnerability and a coverage gap -- a missed detection is a
+      normal issue, and very welcome.

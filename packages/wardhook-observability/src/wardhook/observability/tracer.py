@@ -139,7 +139,10 @@ class Tracer:
             fallback matters when a provider dispatches its callback on a
             worker thread that never saw ``start_run``.
         """
-        if self._stack:
+        # Unreachable today: the only caller, record_usage, handles a non-empty
+        # stack itself and reaches here only once it is empty. Kept so that a
+        # second caller cannot silently misattribute usage across nested nodes.
+        if self._stack:  # pragma: no cover - defensive, see comment
             return self._stack[-1].run_id
         thread_run: str | None = getattr(self._local, "run_id", None)
         if thread_run is not None:

@@ -46,8 +46,17 @@ dependencies = [
 [project.optional-dependencies]
 anthropic = ["langchain-anthropic>=1.0"]
 openai = ["langchain-openai>=1.0"]
+# resolve_model() maps a "gemini-" prefix to langchain-google-genai and its
+# error names this extra, so the extra has to exist: pip warns and installs
+# nothing for an unknown one, leaving the caller in a loop.
+google = ["langchain-google-genai>=2.0"]
 chroma = ["chromadb>=0.5"]
-all = ["langchain-anthropic>=1.0", "langchain-openai>=1.0", "chromadb>=0.5"]
+all = [
+    "langchain-anthropic>=1.0",
+    "langchain-openai>=1.0",
+    "langchain-google-genai>=2.0",
+    "chromadb>=0.5",
+]
 
 [project.scripts]
 wardhook = "wardhook.core.serve.cli:main"

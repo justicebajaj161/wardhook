@@ -262,3 +262,102 @@ def test_the_console_script_entry_point_exists():
 
 def test_no_arguments_shows_help():
     assert "Run agent test cases" in runner.invoke(app, []).output
+
+
+class TestTargetResolutionFailures:
+    def test_a_factory_that_raises_is_reported_rather_than_traced(self, tmp_path, monkeypatch):
+        (tmp_path / "broken_mod.py").write_text(
+            "def factory():\n    raise ValueError('missing config')\n", encoding="utf-8"
+        )
+        (tmp_path / "cases.jsonl").write_text(CASES, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(app, ["run", "cases.jsonl", "--target", "broken_mod:factory"])
+
+        assert result.exit_code != 0
+        assert "missing config" in plain(result)
+
+
+class TestBaselineComparison:
+    def _report(self, tmp_path, monkeypatch, target, name):
+        monkeypatch.chdir(tmp_path)
+        path = tmp_path / name
+        runner.invoke(app, ["run", "cases.jsonl", "--target", target, "-o", str(path)])
+        return path
+
+    def test_a_run_matching_its_baseline_keeps_the_run_exit_code(self, tmp_path, monkeypatch):
+        # No regression, so `run --baseline` must not invent a failure: the
+        # exit code still reflects whether the cases themselves passed.
+        path = workspace(tmp_path)
+        baseline = self._report(path, monkeypatch, "agent_mod:good", "baseline.json")
+
+        result = runner.invoke(
+            app,
+            ["run", "cases.jsonl", "--target", "agent_mod:good", "--baseline", str(baseline)],
+        )
+
+        assert result.exit_code == 0, plain(result)
+        assert "Against baseline" in plain(result)
+        assert "REGRESSED" not in plain(result)
+
+    def test_a_regression_against_the_baseline_exits_one(self, tmp_path, monkeypatch):
+        path = workspace(tmp_path)
+        baseline = self._report(path, monkeypatch, "agent_mod:good", "baseline.json")
+
+        result = runner.invoke(
+            app,
+            ["run", "cases.jsonl", "--target", "agent_mod:bad", "--baseline", str(baseline)],
+        )
+
+        assert result.exit_code == 1
+        assert "REGRESSED" in plain(result)
+
+    def test_compare_reports_a_case_that_left_the_suite(self, tmp_path, monkeypatch):
+        # A shrinking suite must be visible; otherwise deleting a failing case
+        # reads identically to fixing it.
+        path = workspace(tmp_path)
+        baseline = self._report(path, monkeypatch, "agent_mod:good", "baseline.json")
+
+        (path / "cases.jsonl").write_text(CASES.splitlines(keepends=True)[0], encoding="utf-8")
+        current = self._report(path, monkeypatch, "agent_mod:good", "current.json")
+
+        result = runner.invoke(app, ["compare", str(current), "-b", str(baseline)])
+
+        assert "REMOVED" in plain(result)
+        assert "polite" in plain(result)
+
+
+class TestValidateOutput:
+    def test_a_suite_without_tags_still_lists_its_criteria(self, tmp_path, monkeypatch):
+        (tmp_path / "untagged.jsonl").write_text(
+            '{"id": "c1", "input": "?", "expect": {"contains": ["500"]}}\n', encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(app, ["validate", "untagged.jsonl"])
+
+        assert result.exit_code == 0, plain(result)
+        assert "criteria used: contains" in plain(result)
+        assert "tags:" not in plain(result)
+
+    def test_a_suite_with_no_criteria_at_all_reports_neither_line(self, tmp_path, monkeypatch):
+        (tmp_path / "bare.jsonl").write_text(
+            '{"id": "c1", "input": "?", "expect": {}}\n', encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(app, ["validate", "bare.jsonl"])
+
+        assert result.exit_code == 0, plain(result)
+        assert "1 case(s), OK" in plain(result)
+        assert "criteria used" not in plain(result)
+
+
+class TestConsoleEntryPoint:
+    def test_main_delegates_to_the_typer_app(self, monkeypatch):
+        from wardhook.evals import cli as cli_module
+
+        called = []
+        monkeypatch.setattr(cli_module, "app", lambda: called.append(True))
+        cli_module.main()
+        assert called == [True]

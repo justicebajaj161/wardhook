@@ -180,3 +180,55 @@ def warnings_as_errors():
             yield
 
     return _ctx()
+
+
+class TestRecordSerialisationEdges:
+    def test_a_failed_step_carries_its_error_into_the_record(self):
+        step = TraceStep(
+            node="call_model",
+            run_id="r1",
+            started_at="2026-06-24T10:00:00+00:00",
+            latency_ms=12.0,
+            error="RuntimeError: upstream refused",
+        )
+        assert step.to_dict()["error"] == "RuntimeError: upstream refused"
+
+    def test_a_successful_step_omits_the_error_key_entirely(self):
+        # An explicit null would make every consumer test for two empty values.
+        step = TraceStep(
+            node="n", run_id="r1", started_at="2026-06-24T10:00:00+00:00", latency_ms=1.0
+        )
+        assert "error" not in step.to_dict()
+
+    def test_a_failed_run_carries_its_error_into_the_record(self):
+        trace = Trace(
+            run_id="r1",
+            started_at="2026-06-24T10:00:00+00:00",
+            latency_ms=5.0,
+            error="RuntimeError: model exploded",
+        )
+        assert trace.to_dict()["error"] == "RuntimeError: model exploded"
+
+    def test_a_successful_run_omits_the_error_key_entirely(self):
+        trace = Trace(run_id="r1", started_at="2026-06-24T10:00:00+00:00", latency_ms=5.0)
+        assert "error" not in trace.to_dict()
+
+    def test_with_steps_returns_a_new_trace_and_leaves_the_original_alone(self):
+        original = Trace(run_id="r1", started_at="2026-06-24T10:00:00+00:00", latency_ms=5.0)
+        step = TraceStep(
+            node="n", run_id="r1", started_at="2026-06-24T10:00:00+00:00", latency_ms=1.0
+        )
+
+        replaced = original.with_steps([step])
+
+        assert original.steps == ()
+        assert replaced.steps == (step,)
+        assert replaced.run_id == original.run_id
+
+
+class TestPricingLookupEdges:
+    def test_an_empty_model_name_has_no_price(self):
+        # A trace step can carry no model at all; asking for its price must
+        # answer "unknown" rather than looking up the empty string.
+        assert get_price("") is None
+        assert get_price(None) is None

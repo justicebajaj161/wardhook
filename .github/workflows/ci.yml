@@ -112,8 +112,10 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv sync --frozen || uv sync
-      - name: Full suite, including doctests
-        run: uv run pytest -q
+      - name: Full suite, including doctests, with the coverage gate
+        # fail_under = 100 in pyproject.toml. A drop fails the build here
+        # rather than being noticed when someone reads the README's table.
+        run: uv run pytest -q --cov --cov-report=term-missing
       - name: Runnable examples
         run: |
           for script in examples/*.py; do

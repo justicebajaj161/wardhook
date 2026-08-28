@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 import pytest
 
 from wardhook.guardrails.base import Severity
@@ -303,3 +305,69 @@ class TestRedaction:
         # cannot be valid however plausible it looks.
         detector = PIIDetector(pack="healthcare")
         assert detector.detect("NHS number 1000000015") == []
+
+
+class TestValidatorRejections:
+    def test_a_repeated_digit_run_is_not_a_card_number(self):
+        # 16 identical digits pass Luhn on some sequences and appear constantly
+        # in test fixtures and placeholder data. Redacting them trains users to
+        # ignore the redactions that matter.
+        assert validate("luhn", "4444444444444444") is False
+        assert validate("luhn", "0000000000000000") is False
+
+    def test_an_iban_with_non_alphanumeric_characters_is_rejected(self):
+        # int(c, 36) raises on punctuation; a validator must answer False rather
+        # than propagate a ValueError out of a detection pass.
+        assert validate("iban", "GB82 WEST 1234 5698 7654 3!") is False
+
+    def test_an_iban_of_the_wrong_length_is_rejected(self):
+        assert validate("iban", "GB82") is False
+
+    def test_a_valid_iban_still_passes(self):
+        assert validate("iban", "GB82 WEST 12345698765432") is True
+
+
+class TestOverlappingMatches:
+    """Two rules matching the same text is a custom-pack problem, not a builtin one.
+
+    The builtin packs are written not to overlap, so this contract is only
+    reachable through ``register_pack`` -- which CONTRIBUTING invites people to
+    use. Redacting both spans would splice one replacement inside another and
+    corrupt the output.
+    """
+
+    @pytest.fixture
+    def overlapping_pack(self):
+        pack = EntityPack(
+            "overlap-test",
+            (
+                EntityRule(entity="ACCOUNT_REF", pattern=r"\bACC-\d{6}\b"),
+                EntityRule(entity="BARE_DIGITS", pattern=r"\b\d{6}\b"),
+            ),
+        )
+        register_pack(pack, overwrite=True)
+        return pack
+
+    def test_only_one_of_two_overlapping_matches_survives(self, overlapping_pack):
+        matches = PIIDetector(pack="overlap-test").detect("Ref ACC-123456 on file")
+        assert len(matches) == 1
+
+    def test_the_surviving_spans_never_overlap(self, overlapping_pack):
+        matches = PIIDetector(pack="overlap-test").detect("Ref ACC-123456 and ACC-998877")
+        spans = sorted((m.start, m.end) for m in matches)
+        assert len(spans) == 2
+        assert all(a_end <= b_start for (_, a_end), (b_start, _) in pairwise(spans))
+
+    def test_redaction_of_an_overlap_leaves_no_spliced_placeholder(self, overlapping_pack):
+        redacted = PIIRedactor(pack="overlap-test").on_output("Ref ACC-123456 on file", {}).text
+        assert redacted.count("[") == 1
+        assert "123456" not in redacted
+
+
+class TestPIIDebugRepresentation:
+    def test_redactor_repr_names_its_pack_and_entity_count(self):
+        redactor = PIIRedactor(pack="healthcare")
+        text = repr(redactor)
+        assert text.startswith("PIIRedactor(")
+        assert "pack='healthcare'" in text
+        assert "entities=" in text

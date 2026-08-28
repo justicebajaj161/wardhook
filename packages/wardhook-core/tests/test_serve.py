@@ -2,16 +2,59 @@
 
 from __future__ import annotations
 
+import json
+import re
 from types import SimpleNamespace
 
 import pytest
 import typer
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
+from typer.testing import CliRunner
 
 from wardhook.core.agent import AgentGraph
 from wardhook.core.serve.app import create_app
+from wardhook.core.serve.cli import app as cli_app
 from wardhook.core.serve.cli import load_target
+
+runner = CliRunner()
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def plain(result):
+    """Return CLI output with colour, box drawing, and wrapping removed.
+
+    CI forces colour and wraps Typer/rich output in a box, so a plain substring
+    assertion passes locally and fails on a runner.
+
+    Args:
+        result: A ``CliRunner`` result.
+
+    Returns:
+        The visible text as one whitespace-normalised line.
+    """
+    text = _ANSI.sub("", result.output)
+    for char in "\u2502\u256d\u256e\u2570\u256f\u2500":
+        text = text.replace(char, " ")
+    return " ".join(text.split())
+
+
+def _write_agent_module(tmp_path, name="cli_agent_mod", body=None):
+    """Write an importable module exposing a fake-model agent as ``agent``."""
+    module = tmp_path / f"{name}.py"
+    module.write_text(
+        body
+        or (
+            "from langchain_core.language_models.fake_chat_models import GenericFakeChatModel\n"
+            "from langchain_core.messages import AIMessage\n"
+            "from wardhook.core import AgentGraph\n"
+            "agent = AgentGraph(model=GenericFakeChatModel("
+            "messages=iter([AIMessage(content='hi')])), name='cli-agent')\n"
+        ),
+        encoding="utf-8",
+    )
+    return module
 
 
 class Denier:
@@ -185,3 +228,123 @@ class TestLoadTarget:
     def test_object_without_invoke_is_rejected(self):
         with pytest.raises(typer.BadParameter, match=r"no \.invoke"):
             load_target("wardhook.core:DEFAULT_MODEL")
+
+
+class TestServeCommand:
+    def test_starts_uvicorn_with_the_requested_bind(self, tmp_path, monkeypatch):
+        # uvicorn.run blocks forever, so the command is driven with it replaced.
+        # What is being checked is the wiring: the right app, host, and port.
+        _write_agent_module(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        captured = {}
+
+        def fake_run(application, **kwargs):
+            captured["app"] = application
+            captured.update(kwargs)
+
+        import uvicorn
+
+        monkeypatch.setattr(uvicorn, "run", fake_run)
+
+        result = runner.invoke(cli_app, ["serve", "cli_agent_mod:agent", "--port", "9123"])
+
+        assert result.exit_code == 0, plain(result)
+        assert "Serving cli_agent_mod:agent on http://127.0.0.1:9123" in plain(result)
+        assert captured["host"] == "127.0.0.1"
+        assert captured["port"] == 9123
+        assert captured["reload"] is False
+
+    def test_cors_origins_reach_the_application(self, tmp_path, monkeypatch):
+        _write_agent_module(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        captured = {}
+
+        import uvicorn
+
+        monkeypatch.setattr(
+            uvicorn, "run", lambda application, **_kw: captured.update(app=application)
+        )
+
+        result = runner.invoke(
+            cli_app,
+            [
+                "serve",
+                "cli_agent_mod:agent",
+                "--cors-origin",
+                "https://a.example",
+                "--cors-origin",
+                "https://b.example",
+            ],
+        )
+
+        assert result.exit_code == 0, plain(result)
+        client = TestClient(captured["app"])
+        response = client.get("/health", headers={"Origin": "https://a.example"})
+        assert response.headers["access-control-allow-origin"] == "https://a.example"
+
+    def test_an_unloadable_target_fails_before_binding_a_port(self, monkeypatch):
+        import uvicorn
+
+        monkeypatch.setattr(
+            uvicorn, "run", lambda *_a, **_k: pytest.fail("should never reach uvicorn")
+        )
+        result = runner.invoke(cli_app, ["serve", "no_such_module_xyz:agent"])
+        assert result.exit_code != 0
+
+
+class TestInfoCommand:
+    def test_prints_the_agent_configuration_as_json(self, tmp_path, monkeypatch):
+        _write_agent_module(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(cli_app, ["info", "cli_agent_mod:agent"])
+
+        assert result.exit_code == 0, plain(result)
+        described = json.loads(result.output)
+        assert described["name"] == "cli-agent"
+
+    def test_a_bad_target_is_reported_rather_than_traced(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(cli_app, ["info", "no_such_module_xyz:agent"])
+        assert result.exit_code != 0
+        assert "Could not import" in plain(result)
+
+
+class TestFactoryLoading:
+    def test_a_factory_that_raises_is_reported_with_its_cause(self, tmp_path, monkeypatch):
+        _write_agent_module(
+            tmp_path,
+            name="exploding_factory_mod",
+            body=("def build():\n    raise ValueError('missing config')\n"),
+        )
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(typer.BadParameter, match="raised ValueError: missing config"):
+            load_target("exploding_factory_mod:build")
+
+
+class TestConsoleEntryPoint:
+    def test_main_delegates_to_the_typer_app(self, monkeypatch):
+        # `main` is what the `wardhook` console script actually calls, so a
+        # break here is invisible to every other test and total for the user.
+        from wardhook.core.serve import cli as cli_module
+
+        called = []
+        monkeypatch.setattr(cli_module, "app", lambda: called.append(True))
+        cli_module.main()
+        assert called == [True]
+
+
+class TestCallableTargets:
+    def test_a_target_rejecting_keyword_arguments_is_retried_positionally(self):
+        # A bare callable is a legitimate target: anything with .invoke() works.
+        # One that takes only the input must not 500 on principal/run_id.
+        class PositionalOnly:
+            def invoke(self, user_input):
+                return {"output": f"echo: {user_input}"}
+
+        client = TestClient(create_app(PositionalOnly()))
+        response = client.post("/invoke", json={"input": "hello", "run_id": "r1"})
+
+        assert response.status_code == 200
+        assert response.json()["output"] == "echo: hello"

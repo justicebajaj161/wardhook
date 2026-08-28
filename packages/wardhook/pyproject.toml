@@ -60,6 +60,7 @@ dependencies = [
 # would expect without them having to know which package owns the extra.
 anthropic = ["wardhook-core[anthropic]==0.1.0"]
 openai = ["wardhook-core[openai]==0.1.0"]
+google = ["wardhook-core[google]==0.1.0"]
 chroma = ["wardhook-core[chroma]==0.1.0"]
 judge = ["wardhook-evals[judge]==0.1.0"]
 all = [

@@ -271,3 +271,48 @@ class TestCli:
     def test_no_arguments_shows_help(self):
         result = runner.invoke(app, [])
         assert "Inspect Wardhook trace files" in plain(result)
+
+
+class TestCliExtras:
+    def _file(self, tmp_path, *traces):
+        store = JSONLTraceStore(tmp_path / "traces.jsonl")
+        for trace in traces:
+            store.append(trace)
+        return store.path
+
+    def test_the_open_flag_launches_a_browser_at_the_written_file(
+        self, tmp_path, sample_trace, monkeypatch
+    ):
+        # Opening a browser during a test run would hijack the developer's
+        # screen and, on CI, hang. The flag is checked, not exercised.
+        import webbrowser
+
+        opened = []
+        monkeypatch.setattr(webbrowser, "open", opened.append)
+
+        source = self._file(tmp_path, sample_trace)
+        output = tmp_path / "trace.html"
+        result = runner.invoke(app, ["view", str(source), "-o", str(output), "--open"])
+
+        assert result.exit_code == 0, plain(result)
+        assert opened == [output.resolve().as_uri()]
+
+    def test_without_the_flag_no_browser_is_launched(self, tmp_path, sample_trace, monkeypatch):
+        import webbrowser
+
+        opened = []
+        monkeypatch.setattr(webbrowser, "open", opened.append)
+
+        source = self._file(tmp_path, sample_trace)
+        runner.invoke(app, ["view", str(source), "-o", str(tmp_path / "t.html")])
+
+        assert opened == []
+
+    def test_main_delegates_to_the_typer_app(self, monkeypatch):
+        # What the `wardhook-trace` console script actually calls.
+        from wardhook.observability.viewer import cli as cli_module
+
+        called = []
+        monkeypatch.setattr(cli_module, "app", lambda: called.append(True))
+        cli_module.main()
+        assert called == [True]

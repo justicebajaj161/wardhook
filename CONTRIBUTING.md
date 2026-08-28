@@ -22,13 +22,14 @@ make a test pass, that is a design problem with the test.
 
 | Command | What it does |
 | --- | --- |
-| `make check` | Lint, type-check, and test — run this before opening a PR |
+| `make check` | Lint, type-check, and test with the coverage gate — run this before opening a PR |
 | `make test` | Every package's suite, including doctests |
 | `make lint` | `ruff check` and `ruff format --check` |
 | `make fmt` | Autofix lint findings and format |
 | `make types` | `mypy`, each package independently |
 | `make solo` | Install each package alone and run its suite there |
-| `make build` | Build and validate all four distributions |
+| `make cov-table` | Regenerate the README's status table from a real run |
+| `make build` | Build and validate all five distributions |
 
 To run one package: `uv run pytest packages/wardhook-guardrails -q`.
 
@@ -43,8 +44,8 @@ scope; the other three never import core at all. They meet through
 
 Two things enforce it:
 
-- Each package has a `tests/test_isolation.py` that parses every module's AST and
-  fails on a forbidden import.
+- Each package has a `packages/<package>/tests/test_isolation.py` that parses
+  every module's AST and fails on a forbidden import.
 - CI installs each package into an environment with no siblings present and runs
   its suite there.
 
@@ -71,6 +72,10 @@ required, open an issue first — it is a significant architectural change.
 ## Tests
 
 - New behaviour needs a test. New *fixed bugs* especially need one.
+- **Coverage is gated at 100%** (branch coverage), so an untested line fails the
+  build. If a line genuinely cannot be reached through the public API, mark it
+  `# pragma: no cover` with a comment saying why — do not delete a defensive
+  guard to make the number go up.
 - Prefer a small corpus over a single example for anything heuristic. The
   injection detector's thresholds were tuned against the corpus in
   `test_injection_and_rbac.py`, and that corpus is asserted as a whole so a

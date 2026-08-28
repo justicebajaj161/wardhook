@@ -13,6 +13,7 @@ from wardhook.evals import (
     get_criterion,
     register_criterion,
 )
+from wardhook.evals.criteria import _as_list
 
 
 def check(name, expected, outcome):
@@ -221,3 +222,17 @@ class TestRegistry:
 
     def test_criterion_results_serialise_without_empty_detail(self):
         assert CriterionResult("contains", True).to_dict() == {"name": "contains", "passed": True}
+
+
+class TestValueCoercion:
+    def test_a_bare_string_behaves_like_a_one_element_list(self):
+        assert _as_list("500") == ["500"]
+
+    def test_a_sequence_is_stringified_element_by_element(self):
+        assert _as_list(["500", 600]) == ["500", "600"]
+
+    def test_a_non_sequence_scalar_becomes_a_one_element_list(self):
+        # A case file written by hand can carry `"contains": 500` without
+        # quotes. Coercing beats failing on a JSON author's slip.
+        assert _as_list(500) == ["500"]
+        assert _as_list(True) == ["True"]

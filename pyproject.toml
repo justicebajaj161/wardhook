@@ -166,6 +166,13 @@ branch = true
 source = ["wardhook"]
 
 [tool.coverage.report]
+# The suite covers every line and branch of all four packages. Enforced rather
+# than reported so the README's status table cannot quietly drift from reality
+# -- which is the failure mode that makes a reviewer distrust every other
+# number on the page. Genuinely unreachable defensive code carries an explicit
+# `pragma: no cover` naming why, so this threshold does not reward deletion.
+fail_under = 100
+show_missing = true
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",

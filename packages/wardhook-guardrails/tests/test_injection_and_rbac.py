@@ -250,3 +250,63 @@ class TestRoleBasedToolPolicy:
         assert report.score == 0.0
         assert report.severity is Severity.LOW
         assert not report.blocked
+
+
+class TestDebugRepresentations:
+    def test_injection_detector_repr_shows_its_threshold(self):
+        text = repr(InjectionDetector(threshold=0.4))
+        assert text.startswith("InjectionDetector(")
+        assert "threshold=0.4" in text
+        assert "categories=" in text
+
+    def test_policy_repr_shows_roles_and_the_default_stance(self):
+        policy = RoleBasedToolPolicy({"agent": ["lookup_*"], "admin": ["*"]})
+        text = repr(policy)
+        assert text.startswith("RoleBasedToolPolicy(")
+        assert "roles=['admin', 'agent']" in text
+        assert "allow_unlisted=False" in text
+
+    def test_permission_repr_shows_allow_and_deny_patterns(self):
+        from wardhook.guardrails.rbac import ToolPermission
+
+        permission = ToolPermission(role="agent", patterns=("lookup_*",), deny=("issue_*",))
+        text = repr(permission)
+        assert "role='agent'" in text
+        assert "lookup_*" in text
+        assert "issue_*" in text
+
+
+class TestBaseGuardrailNaming:
+    def test_a_subclass_keeps_its_own_declared_name(self):
+        # A subclass that declares `name` has already answered the question;
+        # the default must not overwrite it with the class name.
+        from wardhook.guardrails.base import BaseGuardrail
+
+        class Declared(BaseGuardrail):
+            name = "declared-name"
+
+        assert Declared().name == "declared-name"
+
+    def test_a_subclass_without_a_name_falls_back_to_its_class_name(self):
+        from wardhook.guardrails.base import BaseGuardrail
+
+        class Undeclared(BaseGuardrail):
+            pass
+
+        assert Undeclared().name == "Undeclared"
+
+    def test_an_explicit_name_beats_both(self):
+        from wardhook.guardrails.base import BaseGuardrail
+
+        class Declared(BaseGuardrail):
+            name = "declared-name"
+
+        assert Declared(name="explicit").name == "explicit"
+
+    def test_base_guardrail_repr_shows_the_resolved_name(self):
+        from wardhook.guardrails.base import BaseGuardrail
+
+        class Declared(BaseGuardrail):
+            name = "declared-name"
+
+        assert repr(Declared()) == "Declared(name='declared-name')"

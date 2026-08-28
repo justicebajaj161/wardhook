@@ -125,3 +125,57 @@ class TestNormalizeTools:
             return "b"
 
         assert tool_names(normalize_tools([alpha, beta])) == ["alpha", "beta"]
+
+
+class TestProviderClientConstruction:
+    def test_a_client_that_fails_to_construct_points_at_the_api_key(self, monkeypatch):
+        # The provider package is present but the client rejects the arguments
+        # -- almost always a missing key. The raw provider error alone does not
+        # say which of the two problems the caller has.
+        import sys
+        import types
+
+        module = types.ModuleType("langchain_anthropic")
+
+        class ChatAnthropic:
+            def __init__(self, **kwargs):
+                raise ValueError("api_key must be set")
+
+        module.ChatAnthropic = ChatAnthropic
+        monkeypatch.setitem(sys.modules, "langchain_anthropic", module)
+
+        with pytest.raises(ModelResolutionError, match="API key is set in the environment"):
+            resolve_model("claude-opus-5")
+
+    def test_the_underlying_error_is_kept_as_the_cause(self, monkeypatch):
+        import sys
+        import types
+
+        module = types.ModuleType("langchain_anthropic")
+
+        class ChatAnthropic:
+            def __init__(self, **kwargs):
+                raise ValueError("api_key must be set")
+
+        module.ChatAnthropic = ChatAnthropic
+        monkeypatch.setitem(sys.modules, "langchain_anthropic", module)
+
+        with pytest.raises(ModelResolutionError) as excinfo:
+            resolve_model("claude-opus-5")
+        assert isinstance(excinfo.value.__cause__, ValueError)
+
+    def test_a_constructed_client_is_returned_with_its_model_name(self, monkeypatch):
+        import sys
+        import types
+
+        module = types.ModuleType("langchain_openai")
+
+        class ChatOpenAI:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        module.ChatOpenAI = ChatOpenAI
+        monkeypatch.setitem(sys.modules, "langchain_openai", module)
+
+        client = resolve_model("gpt-4o", temperature=0)
+        assert client.kwargs == {"model": "gpt-4o", "temperature": 0}

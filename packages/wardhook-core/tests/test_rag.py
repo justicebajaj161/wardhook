@@ -17,6 +17,51 @@ from wardhook.core.rag.retriever import Retriever, format_citations
 from wardhook.core.rag.store import InMemoryVectorStore
 
 
+def _minimal_pdf(*pages: str) -> bytes:
+    """Build a valid single-font PDF with one text-bearing page per argument.
+
+    Written by hand rather than fixtured as a binary file so the PDF path is
+    exercised against real ``pypdf`` parsing without carrying a checked-in
+    binary that nobody can review in a diff.
+    """
+    streams = [f"BT /F1 24 Tf 72 700 Td ({text}) Tj ET".encode() for text in pages]
+    page_ids = [3 + i for i in range(len(streams))]
+    content_ids = [3 + len(streams) + 1 + i for i in range(len(streams))]
+    font_id = 3 + len(streams)
+
+    objects: list[bytes] = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [{}] /Count {} >>".format(
+            " ".join(f"{i} 0 R" for i in page_ids), len(streams)
+        ).encode(),
+    ]
+    for content_id in content_ids:
+        objects.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            f"/Resources << /Font << /F1 {font_id} 0 R >> >> "
+            f"/Contents {content_id} 0 R >>".encode()
+        )
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    for stream in streams:
+        objects.append(
+            b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream"
+        )
+
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{number} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n".encode() + b"0000000000 65535 f \n"
+    for offset in offsets:
+        out += f"{offset:010d} 00000 n \n".encode()
+    out += (
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+    ).encode()
+    return bytes(out)
+
+
 class TestChunking:
     def test_short_text_is_a_single_chunk(self):
         chunks = chunk_text("A short note.", "note.txt")
@@ -129,6 +174,49 @@ class TestLoaders:
         path.write_text("x", encoding="utf-8")
         with pytest.raises(NotADirectoryError):
             load_directory(path)
+
+    def test_loads_a_pdf_and_records_the_page_count(self, tmp_path):
+        path = tmp_path / "policy.pdf"
+        path.write_bytes(_minimal_pdf("Storm damage carries a 500 excess."))
+
+        doc = load_document(path)
+        assert "Storm damage carries a 500 excess." in doc.text
+        assert doc.metadata == {"file_type": "pdf", "page_count": 1}
+
+    def test_pdf_pages_are_marked_so_a_chunk_keeps_its_page(self, tmp_path):
+        # The page marker is the only thing tying a mid-document chunk back to
+        # a page number once chunking has thrown the boundaries away.
+        path = tmp_path / "manual.pdf"
+        path.write_bytes(_minimal_pdf("First page body.", "Second page body."))
+
+        doc = load_document(path)
+        assert "[page 1]" in doc.text
+        assert "[page 2]" in doc.text
+        assert doc.text.index("[page 1]") < doc.text.index("[page 2]")
+        assert doc.metadata["page_count"] == 2
+
+    def test_a_pdf_with_no_extractable_text_loads_as_empty(self, tmp_path):
+        # A scanned PDF is pages of images. Loading must not crash; it yields
+        # nothing to chunk, which is the honest answer without OCR.
+        path = tmp_path / "scan.pdf"
+        path.write_bytes(_minimal_pdf(""))
+
+        doc = load_document(path)
+        assert doc.text == ""
+        assert doc.metadata["page_count"] == 1
+
+    def test_a_corrupt_pdf_raises_documentloaderror(self, tmp_path):
+        path = tmp_path / "broken.pdf"
+        path.write_bytes(b"%PDF-1.4\nthis is not actually a pdf")
+        with pytest.raises(DocumentLoadError, match="Could not read PDF"):
+            load_document(path)
+
+    def test_a_pdf_is_picked_up_by_a_directory_load(self, tmp_path):
+        (tmp_path / "notes.txt").write_text("plain", encoding="utf-8")
+        (tmp_path / "policy.pdf").write_bytes(_minimal_pdf("Excess applies."))
+
+        docs = load_directory(tmp_path)
+        assert sorted(d.metadata["file_type"] for d in docs) == ["pdf", "txt"]
 
     def test_document_metadata_survives_chunking(self):
         docs = [Document(text="a b c", source="memo.txt", metadata={"team": "risk"})]
@@ -289,3 +377,65 @@ class TestRetriever:
 
     def test_format_tolerates_partial_records(self):
         assert "[1] unknown (chunk 0)" in format_citations([{"text": "body"}])
+
+
+class TestReprs:
+    """Debug representations are what a developer sees first in a REPL or log."""
+
+    def test_store_repr_reports_its_size(self):
+        store = InMemoryVectorStore()
+        store.add(chunk_text("some text", "a.txt"))
+        assert "InMemoryVectorStore(chunks=1" in repr(store)
+
+    def test_embeddings_repr_reports_the_dimension(self):
+        assert repr(HashingEmbeddings(dim=64)) == "HashingEmbeddings(dim=64)"
+
+    def test_retriever_repr_reports_its_thresholds(self):
+        retriever = Retriever(InMemoryVectorStore(), k=3, score_threshold=0.2)
+        assert repr(retriever) == "Retriever(k=3, score_threshold=0.2)"
+
+
+class TestStoreEdges:
+    def test_chunks_property_returns_a_copy_in_insertion_order(self):
+        store = InMemoryVectorStore()
+        store.add(chunk_text("first document", "a.txt"))
+        store.add(chunk_text("second document", "b.txt"))
+
+        exposed = store.chunks
+        exposed.clear()
+        assert [c.source for c in store.chunks] == ["a.txt", "b.txt"]
+
+    def test_adding_nothing_is_a_no_op(self):
+        store = InMemoryVectorStore()
+        assert store.add([]) == []
+        assert len(store) == 0
+
+    def test_a_one_dimensional_embedding_is_rejected(self):
+        # A flat vector silently broadcasts against the matrix and produces
+        # meaningless similarity scores, so it is refused at the door.
+        class FlatEmbeddings:
+            dim = 4
+
+            def embed_documents(self, texts):
+                return [0.1, 0.2, 0.3, 0.4]
+
+            def embed_query(self, text):
+                return [0.1, 0.2, 0.3, 0.4]
+
+        store = InMemoryVectorStore(embeddings=FlatEmbeddings())
+        with pytest.raises(ValueError, match="2-D sequence of vectors"):
+            store.add(chunk_text("text", "a.txt"))
+
+    def test_trailing_whitespace_does_not_become_an_empty_chunk(self):
+        # A document ending in blank space leaves a whitespace-only buffer. It
+        # must be dropped: an empty chunk embeds to noise and pollutes results.
+        chunks = chunk_text("aaa bbb   ", "a.txt", chunk_size=4, chunk_overlap=0)
+        assert [c.text for c in chunks] == ["aaa ", "bbb "]
+        assert all(c.text.strip() for c in chunks)
+
+    def test_a_chunk_shorter_than_the_overlap_still_terminates(self):
+        # The overlap tail is re-seeded on every boundary; a chunk_size smaller
+        # than the overlap must not loop or drop the remainder.
+        chunks = chunk_text("alpha beta gamma delta", "a.txt", chunk_size=8, chunk_overlap=6)
+        assert chunks
+        assert "".join(c.text for c in chunks).replace(" ", "").endswith("delta")

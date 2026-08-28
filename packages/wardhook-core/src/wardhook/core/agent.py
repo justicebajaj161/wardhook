@@ -508,7 +508,10 @@ class AgentGraph:
             A partial state update, replacing the reply in place if it was
             redacted or withheld.
         """
-        if state.get("blocked"):
+        # Unreachable through the public API today: _route_after_input sends a
+        # blocked run straight to END, so guard_output never sees blocked state.
+        # Kept because the guard is what makes that routing safe to change.
+        if state.get("blocked"):  # pragma: no cover - defensive, see comment
             return {}
 
         messages = state["messages"]
@@ -522,7 +525,7 @@ class AgentGraph:
             reason = blocking.reason or f"blocked by {blocking.guardrail}"
             update["blocked"] = True
             update["block_reason"] = reason
-            if last_ai is not None:
+            if last_ai is not None:  # pragma: no branch - guard_output only runs after call_model
                 update["messages"] = [AIMessage(content=BLOCKED_OUTPUT_MESSAGE, id=last_ai.id)]
             return update
 
@@ -541,7 +544,10 @@ class AgentGraph:
             once per invocation, not once per tool loop, because the question
             does not change between tool round trips.
         """
-        if state.get("citations"):
+        # Also unreachable today: the tool loop returns to call_model, not to
+        # retrieve, so this node runs at most once per invocation. It stays so
+        # that adding an edge back here cannot silently re-embed the question.
+        if state.get("citations"):  # pragma: no cover - defensive, see comment
             return {}
         query = _text_of(_last_of_type(state["messages"], HumanMessage))
         if not query:

@@ -8,6 +8,7 @@ checked from several angles rather than once.
 from __future__ import annotations
 
 import json
+from typing import ClassVar
 
 import pytest
 
@@ -226,6 +227,26 @@ class TestReport:
         assert report["by_entity"] == {"EMAIL": 2, "US_SSN": 2}
         assert report["first_event"] <= report["last_event"]
 
+    def test_entities_are_counted_without_a_before_argument(self, audit_log):
+        # The README quickstart calls record() without `before`, so no diff is
+        # built. by_entity read only the diff and came back empty on a run that
+        # had just redacted two entities, which reads as a broken summary.
+        redactor = PIIRedactor()
+        result = redactor.on_output(SSN_TEXT, {})
+        audit_log.record(result, stage="output", run_id="req-17")
+
+        assert audit_log.report()["by_entity"] == {"EMAIL": 1, "US_SSN": 1}
+
+    def test_the_diff_wins_over_details_when_both_are_present(self, audit_log):
+        # The diff describes what actually changed in this text; details
+        # describes what the guardrail matched. When a diff was recorded it is
+        # the more specific answer, so it must not be double-counted or lost.
+        redactor = PIIRedactor()
+        result = redactor.on_output(SSN_TEXT, {})
+        audit_log.record(result, stage="output", run_id="r1", before=SSN_TEXT)
+
+        assert audit_log.report()["by_entity"] == {"EMAIL": 1, "US_SSN": 1}
+
     def test_an_empty_report_is_well_formed(self):
         report = AuditLogger().report()
         assert report["total_events"] == 0
@@ -263,3 +284,92 @@ class TestReport:
     def test_events_without_fingerprints_omit_the_key(self, audit_log):
         event = audit_log.log(guardrail="pii", action="block", stage="output")
         assert "fingerprints" not in event.to_dict()
+
+
+class TestDebugRepresentations:
+    """What a developer sees in a REPL, a log line, or a failed assertion."""
+
+    def test_a_file_backed_logger_shows_its_path_and_event_count(self, tmp_path):
+        path = tmp_path / "audit.jsonl"
+        logger = AuditLogger(path)
+        logger.log(guardrail="g", action="block", stage="input")
+        assert repr(logger) == f"AuditLogger(path='{path}', events=1)"
+
+    def test_an_in_memory_logger_says_so_rather_than_showing_none(self):
+        assert repr(AuditLogger()) == "AuditLogger(path='memory', events=0)"
+
+
+class TestReadingBackTheTrail:
+    def test_blank_lines_are_skipped_without_ending_the_read(self, tmp_path):
+        # A trail is appended to over a long run; a stray newline must not
+        # truncate everything a reviewer can still recover.
+        path = tmp_path / "audit.jsonl"
+        logger = AuditLogger(path)
+        logger.log(guardrail="g", action="block", stage="input", run_id="r1")
+        logger.log(guardrail="g", action="redact", stage="output", run_id="r1")
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write("\n   \n")
+
+        records = list(logger.read())
+        assert [r["action"] for r in records] == ["block", "redact"]
+
+
+class TestRecordingAnEventMapping:
+    """``record`` accepts one of core's event dicts, not only a result object.
+
+    Passing a mapping used to degrade silently: ``getattr`` finds nothing on a
+    dict, so the event became an "allow" and ``record_allows=False`` then threw
+    it away -- an empty audit trail with no error, which is the worst way for a
+    compliance control to fail.
+    """
+
+    EVENT: ClassVar = {
+        "guardrail": "pii-redactor",
+        "action": "redact",
+        "stage": "output",
+        "rule": "EMAIL",
+        "severity": "medium",
+        "reason": "redacted 1 occurrence(s): EMAIL",
+        "details": {"entities": {"EMAIL": 1}},
+    }
+
+    def test_the_event_is_recorded_rather_than_dropped(self, audit_log):
+        audit_log.record(dict(self.EVENT), stage="output", run_id="r1")
+        assert audit_log.report()["total_events"] == 1
+
+    def test_every_field_is_read_by_key(self, audit_log):
+        event = audit_log.record(dict(self.EVENT), stage="output", run_id="r1")
+
+        assert event.action == "redact"
+        assert event.guardrail == "pii-redactor"
+        assert event.rule == "EMAIL"
+        assert event.severity == "medium"
+        assert event.reason == "redacted 1 occurrence(s): EMAIL"
+
+    def test_its_entity_counts_reach_the_report(self, audit_log):
+        audit_log.record(dict(self.EVENT), stage="output", run_id="r1")
+        assert audit_log.report()["by_entity"] == {"EMAIL": 1}
+
+    def test_a_sparse_mapping_falls_back_to_the_same_defaults_as_record_run(self, audit_log):
+        event = audit_log.record({"guardrail": "g"}, stage="input", run_id="r1")
+
+        assert event.action == "allow"
+        assert event.severity == "low"
+        assert event.guardrail == "g"
+
+    def test_an_explicit_null_does_not_beat_the_default(self, audit_log):
+        # JSON round-trips absent fields as null. `{"action": null}` means
+        # "unset", not "an action literally named None".
+        event = audit_log.record(
+            {"guardrail": "g", "action": None, "severity": None}, stage="input", run_id="r1"
+        )
+
+        assert event.action == "allow"
+        assert event.severity == "low"
+
+    def test_a_result_object_is_still_read_by_attribute(self, audit_log):
+        redactor = PIIRedactor()
+        event = audit_log.record(redactor.on_output(SSN_TEXT, {}), stage="output", run_id="r1")
+
+        assert event.action == "redact"
+        assert event.guardrail == "pii-redactor"

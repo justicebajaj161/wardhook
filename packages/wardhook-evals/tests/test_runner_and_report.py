@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 from wardhook.evals import CaseResult, EvalCase, EvalReport, EvalRunner, describe_target
+from wardhook.evals.runner import _text_of
 
 
 class TestTargets:
@@ -219,3 +222,61 @@ class TestReport:
         assert repr(EvalRunner(agent).run(cases)) == (
             "EvalReport(passed=1/2, target='scripted-agent')"
         )
+
+
+class TestCaseResultSerialisation:
+    """Optional fields are omitted rather than nulled, for the same reason cases are."""
+
+    def test_a_clean_pass_carries_only_the_core_keys(self):
+        record = CaseResult(id="c1", passed=True, latency_ms=12.0).to_dict()
+        assert set(record) == {"id", "passed", "criteria", "latency_ms"}
+
+    def test_cost_blocked_output_error_and_tags_all_survive(self):
+        record = CaseResult(
+            id="c1",
+            passed=False,
+            latency_ms=12.0,
+            cost=0.001234,
+            blocked=True,
+            output="the answer",
+            error="RuntimeError: boom",
+            tags=("smoke",),
+        ).to_dict()
+
+        assert record["cost"] == 0.001234
+        assert record["blocked"] is True
+        assert record["output"] == "the answer"
+        assert record["error"] == "RuntimeError: boom"
+        assert record["tags"] == ["smoke"]
+
+    def test_a_zero_cost_is_still_reported(self):
+        # 0.0 is a real measurement -- an unpriced model -- not a missing one.
+        assert CaseResult(id="c1", passed=True, cost=0.0).to_dict()["cost"] == 0.0
+
+
+class TestOutputCoercion:
+    """A target can return anything. None of it may crash the runner."""
+
+    def test_none_reads_as_empty_text(self):
+        assert _text_of(None) == ""
+
+    def test_a_mapping_without_a_known_key_is_stringified(self):
+        assert "unexpected" in _text_of({"unexpected": "shape"})
+
+    def test_a_nested_mapping_is_followed_through_the_known_key(self):
+        assert _text_of({"output": {"output": "inner"}}) == "inner"
+
+    def test_an_object_with_string_content_uses_it(self):
+        class Message:
+            content = "from content"
+
+        assert _text_of(Message()) == "from content"
+
+    def test_an_object_with_non_string_content_is_stringified(self):
+        class Message:
+            content: ClassVar = [{"type": "text", "text": "block"}]
+
+        assert "block" in _text_of(Message())
+
+    def test_anything_else_falls_back_to_str(self):
+        assert _text_of(42) == "42"

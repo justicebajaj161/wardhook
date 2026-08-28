@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Set the version across all four packages.
+# Set the version across all five packages.
 #
 # The packages are versioned in lockstep while the project is pre-1.0. Each of
 # the four real ones declares its version twice -- in its `pyproject.toml` and
 # as `__version__` in its `__init__.py` -- and the `wardhook` meta-package
-# declares it once plus pins all four dependencies to it exactly. Missing any
-# one of those eleven is easy, and the release workflow will reject the tag, so
-# this does the lot at once.
+# declares it once plus pins all four dependencies to it exactly, including the
+# pins inside its extras. Missing one of those by hand is easy and the release
+# workflow will reject the tag for it, so this does the lot at once. Adding an
+# extra adds another pin, which is why nothing here counts them.
 #
 #   ./scripts/bump-version.sh 0.2.0
 

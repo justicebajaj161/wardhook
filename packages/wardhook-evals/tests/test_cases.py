@@ -106,3 +106,43 @@ class TestFiles:
     def test_from_dict_rejects_a_non_mapping(self):
         with pytest.raises(CaseFormatError, match="expected a JSON object"):
             EvalCase.from_dict(["not", "a", "mapping"])
+
+
+class TestOptionalFieldsRoundTrip:
+    """Optional fields are omitted when empty, so a file stays readable.
+
+    An explicit null for every unset field triples the width of a case file and
+    makes a human-written suite unpleasant to diff.
+    """
+
+    def test_a_minimal_case_carries_only_the_required_keys(self):
+        case = EvalCase(id="c1", input="hi", expect={"contains": "hello"})
+        assert set(case.to_dict()) == {"id", "input", "expect"}
+
+    def test_every_optional_field_survives_a_round_trip(self):
+        case = EvalCase(
+            id="c1",
+            input="hi",
+            expect={"contains": "hello"},
+            description="a described case",
+            tags=("smoke", "pii"),
+            principal={"id": "u-1", "roles": ["agent"]},
+            metadata={"owner": "risk"},
+        )
+        record = case.to_dict()
+
+        assert record["description"] == "a described case"
+        assert record["tags"] == ["smoke", "pii"]
+        assert record["principal"] == {"id": "u-1", "roles": ["agent"]}
+        assert record["metadata"] == {"owner": "risk"}
+        assert EvalCase.from_dict(record).to_dict() == record
+
+    def test_a_case_file_round_trips_through_dump_and_load(self, tmp_path):
+        cases = [
+            EvalCase(id="c1", input="hi", expect={"contains": "hello"}, tags=("smoke",)),
+            EvalCase(id="c2", input="bye", expect={"blocked": True}, description="blocked case"),
+        ]
+        path = tmp_path / "cases.jsonl"
+        path.write_text(dump_cases(cases), encoding="utf-8")
+
+        assert [c.to_dict() for c in load_cases(path)] == [c.to_dict() for c in cases]
