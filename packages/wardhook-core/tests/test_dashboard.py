@@ -18,11 +18,13 @@ from langchain_core.messages import AIMessage
 
 from wardhook.core.agent import AgentGraph
 from wardhook.core.rag.retriever import Retriever
+from wardhook.core.rag.store import InMemoryVectorStore
 from wardhook.core.serve.dashboard import create_dashboard
 from wardhook.core.serve.topology import (
     Topology,
     TopologyEdge,
     TopologyNode,
+    describe_agent,
     layout,
     read_topology,
     render_svg,
@@ -743,7 +745,8 @@ class TestTopologyOnThePage:
 
     def test_an_agent_with_no_graph_gets_the_reason_instead_of_a_diagram(self):
         page = TestClient(create_dashboard(Minimal())).get("/").text
-        assert "<svg" not in page
+        assert 'class="topology"' not in page
+        assert "data-node=" not in page
         assert "no .graph attribute" in page
 
     def test_the_diagram_adds_no_external_resource(self, full_agent):
@@ -872,3 +875,81 @@ class TestTraceOverlay:
         assert len(visits) == 2
         assert sum(s["tokens_in"] for s in visits) == run["totals"]["tokens_in"]
         assert sum(s["cost"] for s in visits) == run["totals"]["cost"]
+
+
+class TestDescribesTheSystemDesign:
+    def test_it_reports_how_retrieval_is_wired(self, full_agent):
+        # "Retrieval: enabled" does not answer the question a developer has,
+        # which is whether the thing is actually going to find anything.
+        block = describe_agent(full_agent)["retrieval"]
+        assert block["enabled"] is True
+        assert block["retriever"] == "Retriever"
+        assert block["store"] == "InMemoryVectorStore"
+        assert block["embeddings"] == "HashingEmbeddings"
+        assert block["top_k"] == 4
+        assert block["indexed_chunks"] == 2
+
+    def test_an_empty_index_is_visible_rather_than_implied(self, make_model):
+        # An agent whose store is empty looks identical to a working one until
+        # you notice it is answering from nothing. This is the tell.
+        agent = AgentGraph(model=make_model("ok"), retriever=Retriever(InMemoryVectorStore()))
+        assert describe_agent(agent)["retrieval"]["indexed_chunks"] == 0
+        assert "0 chunks indexed" in TestClient(create_dashboard(agent)).get("/").text
+
+    def test_a_store_that_cannot_be_sized_is_not_an_error(self, make_model):
+        # A store from outside Wardhook need not implement __len__.
+        class Unsized:
+            def search(self, query, k=4):
+                return []
+
+        agent = AgentGraph(model=make_model("ok"), retriever=Retriever(Unsized()))
+        assert describe_agent(agent)["retrieval"]["indexed_chunks"] is None
+        assert "size unknown" in TestClient(create_dashboard(agent)).get("/").text
+
+    def test_no_retriever_says_so_rather_than_showing_empty_rows(self, bare_agent):
+        assert describe_agent(bare_agent)["retrieval"] == {"enabled": False}
+        page = TestClient(create_dashboard(bare_agent)).get("/").text
+        assert "not configured" in page
+        assert "vector store" not in page
+
+    def test_it_reports_the_orchestration_limits(self, full_agent):
+        block = describe_agent(full_agent)["orchestration"]
+        assert block["max_tool_iterations"] == 10
+        assert block["guardrail_error_policy"] == "block"
+        page = TestClient(create_dashboard(full_agent)).get("/").text
+        assert "at most 10 round trips" in page
+        assert "if a guardrail raises" in page
+
+    def test_it_names_the_model(self, full_agent):
+        assert describe_agent(full_agent)["model"] == "ToolCallingFake"
+
+    def test_a_plain_callable_reports_nothing_rather_than_raising(self):
+        # Serving a bare object with .invoke() is supported, so every one of
+        # these reads has to survive an agent that has none of them.
+        described = describe_agent(Minimal())
+        assert described["model"] is None
+        assert described["retrieval"] == {"enabled": False}
+        assert described["orchestration"] == {
+            "max_tool_iterations": None,
+            "guardrail_error_policy": None,
+        }
+        assert TestClient(create_dashboard(Minimal())).get("/").status_code == 200
+
+
+class TestBranding:
+    def test_the_logo_is_drawn_inline_not_fetched(self, bare_agent):
+        # A base64 PNG would arrive as src="data:..." and trip the page's own
+        # no-external-resource check -- a check worth keeping sharper than the
+        # logo. Drawn as SVG, it costs under a kilobyte and stays crisp.
+        page = TestClient(create_dashboard(bare_agent)).get("/").text
+        assert 'aria-label="Wardhook"' in page
+        assert "<img" not in page
+        assert re.findall(r'(?:src|href)\s*=\s*["\'](?!#)([^"\']+)', page) == []
+
+    def test_the_logo_adapts_to_the_readers_theme(self, bare_agent):
+        # The mark is stroked with a gradient of brand tokens, and the tokens
+        # are redefined under prefers-color-scheme, so one page works on both.
+        page = TestClient(create_dashboard(bare_agent)).get("/").text
+        assert "--brand-1" in page
+        assert "prefers-color-scheme: dark" in page
+        assert page.count("--brand-1:") == 2, "brand colours need a dark variant"

@@ -32,6 +32,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+from wardhook.core.models import describe_model
+
 __all__ = [
     "Layout",
     "NodeBox",
@@ -599,6 +601,45 @@ def render_svg(topology: Topology) -> str:
     )
 
 
+def _retrieval_of(agent: Any) -> dict[str, Any]:
+    """Describe how retrieval is configured, if it is.
+
+    Every value here is a constructor argument or an index size -- how the
+    agent was wired, never anything it retrieved. The chunk count is the one
+    that earns its place in practice: an agent whose store is empty looks
+    identical to a working one until you notice it is answering from nothing.
+
+    Args:
+        agent: The agent to inspect.
+
+    Returns:
+        A summary. ``enabled`` is ``False`` and the rest is ``None`` when no
+        retriever is attached.
+    """
+    retriever = getattr(agent, "retriever", None)
+    if retriever is None:
+        return {"enabled": False}
+
+    store = getattr(retriever, "store", None)
+    chunks: int | None = None
+    try:
+        chunks = len(store) if store is not None else None
+    except TypeError:
+        # A store from outside Wardhook need not be sized. Not an error, and
+        # not worth failing an information panel over.
+        chunks = None
+
+    return {
+        "enabled": True,
+        "retriever": type(retriever).__name__,
+        "store": None if store is None else type(store).__name__,
+        "embeddings": None if store is None else type(getattr(store, "embeddings", None)).__name__,
+        "top_k": getattr(retriever, "k", None),
+        "score_threshold": getattr(retriever, "score_threshold", None),
+        "indexed_chunks": chunks,
+    }
+
+
 def describe_agent(agent: Any) -> dict[str, Any]:
     """Summarise an agent's configuration as plain data.
 
@@ -624,11 +665,18 @@ def describe_agent(agent: Any) -> dict[str, Any]:
     """
     tools = getattr(agent, "tools", []) or []
     guardrails = getattr(agent, "guardrails", []) or []
+    model = getattr(agent, "model", None)
     return {
         "name": getattr(agent, "name", type(agent).__name__),
         "type": type(agent).__name__,
+        "model": None if model is None else describe_model(model),
         "tools": [getattr(t, "name", str(t)) for t in tools],
         "guardrails": [str(getattr(g, "name", type(g).__name__)) for g in guardrails],
         "retrieval_enabled": getattr(agent, "retriever", None) is not None,
         "telemetry_enabled": getattr(agent, "telemetry", None) is not None,
+        "retrieval": _retrieval_of(agent),
+        "orchestration": {
+            "max_tool_iterations": getattr(agent, "max_tool_iterations", None),
+            "guardrail_error_policy": getattr(agent, "guardrail_error_policy", None),
+        },
     }

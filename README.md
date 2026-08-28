@@ -1,6 +1,12 @@
-# Wardhook
+<p align="center">
+  <img src="docs/assets/wardhook.png" alt="Wardhook" width="440">
+</p>
 
-**Governance and observability for LangGraph agents — as four libraries you can adopt one at a time.**
+<h1 align="center">Wardhook</h1>
+
+<p align="center">
+  <b>Governance and observability for LangGraph agents — as four libraries you can adopt one at a time.</b>
+</p>
 
 [![CI](https://github.com/justicebajaj161/wardhook/actions/workflows/ci.yml/badge.svg)](https://github.com/justicebajaj161/wardhook/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -145,17 +151,30 @@ wardhook serve myapp.agents:support_agent --dashboard
 # Dashboard at http://127.0.0.1:8000/dashboard/
 ```
 
-One page, served from your own process, showing the agent's real graph with each
-node shaded by what it actually cost. Nothing is fetched from a CDN and no trace
-leaves the machine — the whole page is a few kilobytes of inlined HTML, CSS and
-SVG, and it works with the network unplugged.
+<p align="center">
+  <img src="docs/assets/dashboard.png" alt="The Wardhook dashboard: an agent's orchestration graph with a run's cost overlaid" width="780">
+</p>
 
-The diagram is derived from the compiled graph, so it is accurate to your
-configuration rather than to a template: an agent with no retriever has no
-`retrieve` box. Picking a run shades each node by its latency and writes its
-tokens and cost underneath. A node visited more than once — `call_model`, on
-every tool round trip — is totalled, so what a box says reconciles with the run
-totals above it.
+One page, served from your own process. Nothing is fetched from a CDN and no
+trace leaves the machine — the whole page is about 20 KB of inlined HTML, CSS
+and SVG, logo included, and it works with the network unplugged.
+
+**It shows the system design, not a picture of one.** The diagram is the graph
+your agent actually compiled, so it is accurate to your configuration rather
+than to a template: guardrails appear as `guard_input` / `guard_output`, RAG
+appears as `retrieve`, the tool loop appears as a real cycle back into
+`call_model`, and an agent without a retriever simply has no `retrieve` box.
+Conditional edges are dashed and carry the branch name the router returns.
+
+The Configuration panel answers the questions the diagram cannot: which model,
+which vector store and embeddings, **how many chunks are actually indexed**, the
+top-k and score threshold, how many tool round trips are permitted, and what
+happens if a guardrail itself raises. An agent whose index is empty looks
+identical to a working one until you see it say `0 chunks indexed`.
+
+Picking a run shades each node by its latency and writes its tokens and cost
+underneath. A node visited more than once — `call_model`, on every tool round
+trip — is totalled, so what a box says reconciles with the run totals above it.
 
 **It shows telemetry and configuration. It never shows content.** No prompt, no
 model output, no retrieved chunk, no guardrail event body. That is not a filter
@@ -244,7 +263,7 @@ Pre-1.0 and built in the open. All four packages are complete.
 
 | Package | Status | Tests | Coverage |
 | --- | --- | --- | --- |
-| wardhook-core | ✅ Complete | 317 | 100% |
+| wardhook-core | ✅ Complete | 326 | 100% |
 | wardhook-guardrails | ✅ Complete | 222 | 100% |
 | wardhook-observability | ✅ Complete | 162 | 100% |
 | wardhook-evals | ✅ Complete | 170 | 100% |

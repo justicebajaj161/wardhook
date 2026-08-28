@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from html import escape
 from typing import Any
 
@@ -92,6 +92,26 @@ _DEFAULT_LIMIT = 100
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 
+# The Wardhook mark, drawn rather than embedded. A base64 PNG would be ~40x
+# larger, would blur on a high-density display, and -- because it would arrive
+# as `src="data:..."` -- would trip the page's own no-external-resource
+# assertion, which is a check worth keeping sharper than the logo.
+_LOGO = """
+<svg class="mark" viewBox="0 0 100 78" role="img" aria-label="Wardhook">
+<defs><linearGradient id="wh-brand" x1="0" y1="0" x2="1" y2="0.25">
+<stop offset="0" stop-color="#8B2FE8"/><stop offset="0.52" stop-color="#4C6FF5"/>
+<stop offset="1" stop-color="#22B8F0"/></linearGradient></defs>
+<g fill="none" stroke="url(#wh-brand)" stroke-linecap="round" stroke-linejoin="round">
+<path d="M7.8,8.4 L25.5,48.2 L48.6,12.4 L73.8,48.2 L92.2,8.4" stroke-width="6.3"/>
+<path d="M48.9,38.5 C44.6,45.6 38.4,50.4 38.6,58.2
+         C38.9,67.4 49.3,72.6 57.2,68.2 C61.4,65.8 62.9,61.6 62.1,58.1"
+      stroke-width="5.7"/>
+<circle cx="7.8" cy="8.4" r="4.9" stroke-width="4.3"/>
+<circle cx="92.2" cy="8.4" r="4.9" stroke-width="4.3"/>
+<circle cx="48.9" cy="33.5" r="4.3" stroke-width="3.8"/>
+</g></svg>
+"""
+
 # Copied from `wardhook.observability.viewer.html`, not imported from it.
 # `wardhook-core` must install and pass with no sibling package present, and
 # `make solo` is the check -- so the CSS is duplicated on purpose. That
@@ -101,110 +121,134 @@ _TRUTHY = frozenset({"1", "true", "yes", "on"})
 _STYLE = """
 :root {
   color-scheme: light dark;
-  --bg: #ffffff; --fg: #1a1d23; --muted: #6b7280; --line: #e5e7eb;
-  --panel: #f9fafb; --bar: #3b82f6; --bar-soft: #dbeafe;
+  --bg: #ffffff; --fg: #14171c; --muted: #6b7280; --line: #e6e8ec;
+  --panel: #fafbfc; --canvas: #f6f7f9; --bar: #4c6ff5; --bar-soft: #e5ecff;
   --err-fg: #991b1b; --err-bg: #fef2f2; --err-line: #fecaca;
   --warn-fg: #92400e; --warn-bg: #fffbeb; --warn-line: #fde68a;
   --ok-fg: #065f46; --ok-bg: #ecfdf5; --ok-line: #a7f3d0;
+  --brand-1: #8b2fe8; --brand-2: #4c6ff5; --brand-3: #22b8f0;
+  --shadow: 0 1px 2px rgba(16, 20, 30, .04), 0 8px 24px rgba(16, 20, 30, .04);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f1115; --fg: #e6e8eb; --muted: #9aa1ab; --line: #262a31;
-    --panel: #161a20; --bar: #60a5fa; --bar-soft: #1e3a5f;
+    --bg: #0c0e12; --fg: #e8eaed; --muted: #98a0ab; --line: #23262d;
+    --panel: #12151a; --canvas: #0f1216; --bar: #6d8bff; --bar-soft: #1b2a52;
     --err-fg: #fca5a5; --err-bg: #2a1416; --err-line: #7f1d1d;
     --warn-fg: #fcd34d; --warn-bg: #241c07; --warn-line: #78500a;
     --ok-fg: #6ee7b7; --ok-bg: #06231a; --ok-line: #0f5132;
+    --brand-1: #a56bff; --brand-2: #6d8bff; --brand-3: #46c9ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
   }
 }
 * { box-sizing: border-box; }
 body {
-  margin: 0; padding: 2rem 1.25rem; background: var(--bg); color: var(--fg);
+  margin: 0; padding: 2.25rem 1.25rem 3rem; background: var(--bg); color: var(--fg);
   font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 .wrap { max-width: 1080px; margin: 0 auto; }
-h1 { font-size: 1.4rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
-h2 { font-size: .95rem; margin: 0 0 .75rem; letter-spacing: -.005em; }
-.sub { color: var(--muted); font-size: .85rem; margin-bottom: 1.5rem; }
+.brand { display: flex; align-items: center; gap: .5rem; margin-bottom: 1.4rem; }
+.mark { width: 34px; height: 27px; display: block; flex: none; }
+.wordmark {
+  font-size: .82rem; font-weight: 700; letter-spacing: .18em; text-transform: uppercase;
+  background: linear-gradient(100deg, var(--brand-1), var(--brand-2) 55%, var(--brand-3));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+h1 { font-size: 1.7rem; margin: 0 0 .3rem; letter-spacing: -.02em; font-weight: 660; }
+h2 {
+  font-size: .74rem; margin: 0 0 1rem; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--muted); font-weight: 650;
+}
+.sub { color: var(--muted); font-size: .88rem; margin-bottom: 1.6rem; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .card {
-  border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem;
-  margin-bottom: 1.25rem; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 14px; padding: 1.15rem 1.25rem;
+  margin-bottom: 1.25rem; background: var(--panel); box-shadow: var(--shadow);
 }
 .banner {
-  border: 1px solid var(--line); border-left-width: 4px; border-radius: 6px;
-  padding: .7rem .85rem; margin-bottom: 1.25rem; font-size: .85rem;
+  border: 1px solid var(--line); border-left-width: 3px; border-radius: 10px;
+  padding: .75rem .9rem; margin-bottom: 1.25rem; font-size: .84rem;
 }
 .banner.memory { border-color: var(--warn-line); background: var(--warn-bg); color: var(--warn-fg); }
 .banner.store { border-color: var(--ok-line); background: var(--ok-bg); color: var(--ok-fg); }
 .banner.none { border-color: var(--line); background: var(--panel); color: var(--muted); }
-.facts { display: grid; grid-template-columns: 10rem 1fr; gap: .45rem 1rem; font-size: .87rem; }
+.facts {
+  display: grid; grid-template-columns: 11rem 1fr; gap: .55rem 1rem; font-size: .87rem;
+}
 .facts dt {
-  color: var(--muted); font-size: .72rem; text-transform: uppercase;
-  letter-spacing: .05em; padding-top: .18rem;
+  color: var(--muted); font-size: .69rem; text-transform: uppercase;
+  letter-spacing: .07em; padding-top: .22rem; font-weight: 600;
 }
 .facts dd { margin: 0; }
+.facts + .facts { margin-top: .55rem; }
+.group {
+  margin-top: 1.15rem; padding-top: 1rem; border-top: 1px dashed var(--line);
+}
 .chip {
   display: inline-block; border: 1px solid var(--line); border-radius: 999px;
-  padding: .08rem .55rem; margin: 0 .3rem .3rem 0; font-size: .8rem; background: var(--bg);
+  padding: .1rem .6rem; margin: 0 .3rem .3rem 0; font-size: .79rem; background: var(--bg);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-.scroll { overflow-x: auto; }
+.chip.accent { border-color: var(--bar-soft); background: var(--bar-soft); color: var(--bar); }
+.off { color: var(--muted); }
+.empty {
+  color: var(--muted); padding: 1.75rem; text-align: center;
+  border: 1px dashed var(--line); border-radius: 12px; font-size: .88rem;
+}
+footer {
+  color: var(--muted); font-size: .78rem; margin-top: 2.25rem;
+  border-top: 1px solid var(--line); padding-top: .9rem;
+}
+.scroll { overflow-x: auto; background: var(--canvas); border-radius: 12px; padding: .5rem 0; }
 .topology { display: block; margin: 0 auto; max-width: 100%; height: auto; }
 .topology .box { fill: var(--bg); stroke: var(--line); stroke-width: 1.5; }
-.topology .terminal .box { fill: var(--panel); stroke-dasharray: 3 3; }
+.topology .terminal .box { fill: var(--panel); stroke-dasharray: 4 4; }
 .topology .label {
   fill: var(--fg); font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .topology .metric {
   fill: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-.topology .edge { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: .75; }
+.topology .edge { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: .6; }
 .topology .edge.conditional { stroke-dasharray: 5 4; }
-.topology .arrow { fill: var(--muted); opacity: .75; }
+.topology .arrow { fill: var(--muted); opacity: .6; }
 .topology .edge-label {
   fill: var(--muted); font: 10px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
-.legend { color: var(--muted); font-size: .78rem; margin: .9rem 0 0; }
-.runbar { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-bottom: .9rem; }
+.legend { color: var(--muted); font-size: .78rem; margin: 1rem 0 0; }
+.runbar { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-bottom: 1rem; }
 .runbar label {
-  color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); font-size: .69rem; text-transform: uppercase; letter-spacing: .07em;
+  font-weight: 600;
 }
 select, button {
   font: inherit; font-size: .85rem; color: var(--fg); background: var(--bg);
-  border: 1px solid var(--line); border-radius: 6px; padding: .28rem .6rem;
+  border: 1px solid var(--line); border-radius: 8px; padding: .32rem .65rem;
 }
 button { cursor: pointer; }
-button:hover { background: var(--panel); }
+button:hover { border-color: var(--bar); color: var(--bar); }
 select { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 22rem; }
 #wh-status { color: var(--muted); font-size: .8rem; }
-.selected { border-top: 1px solid var(--line); padding-top: .9rem; margin-bottom: .9rem; }
+.selected { border-top: 1px solid var(--line); padding-top: 1rem; margin-bottom: 1rem; }
 .selected[hidden] { display: none; }
-.runid { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .9rem; }
+.runid { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: 1rem; }
 .runid .k {
-  color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); font-size: .69rem; text-transform: uppercase; letter-spacing: .07em;
+  font-weight: 600;
 }
 #wh-runid {
   font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--fg);
-  background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
-  padding: .28rem .6rem; min-width: 21rem; max-width: 100%;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: .32rem .65rem; min-width: 21rem; max-width: 100%;
 }
-.kpis { display: flex; flex-wrap: wrap; gap: 1.5rem; }
-.kpi .v { font-size: 1.15rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.kpis { display: flex; flex-wrap: wrap; gap: 1.6rem; }
+.kpi .v { font-size: 1.2rem; font-weight: 660; font-variant-numeric: tabular-nums; }
 .kpi .k {
-  color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); font-size: .69rem; text-transform: uppercase; letter-spacing: .07em;
+  font-weight: 600;
 }
 .topology .node.failed .box { stroke: var(--err-line); stroke-width: 2; }
-.topology .node.touched .label { fill: var(--fg); }
-.topology .node:not(.touched) .label { opacity: .55; }
-.off { color: var(--muted); }
-.empty {
-  color: var(--muted); padding: 1.5rem; text-align: center;
-  border: 1px dashed var(--line); border-radius: 10px;
-}
-footer {
-  color: var(--muted); font-size: .78rem; margin-top: 2rem;
-  border-top: 1px solid var(--line); padding-top: .85rem;
-}
+.topology .node:not(.touched) .label { opacity: .62; }
 """
 
 
@@ -617,6 +661,58 @@ def _chips(values: Sequence[str], empty: str) -> str:
     return "".join(f'<span class="chip">{escape(str(value))}</span>' for value in values)
 
 
+def _fact(term: str, value: str) -> str:
+    """Render one configuration row.
+
+    Args:
+        term: The label.
+        value: Already-escaped HTML for the value.
+
+    Returns:
+        A `<dt>`/`<dd>` pair.
+    """
+    return f"<dt>{escape(term)}</dt><dd>{value}</dd>"
+
+
+def _retrieval_facts(retrieval: Mapping[str, Any]) -> str:
+    """Describe the retrieval configuration, or say there is none.
+
+    Args:
+        retrieval: The ``retrieval`` block from :func:`describe_agent`.
+
+    Returns:
+        HTML rows. Everything shown is a constructor argument or an index size
+        -- how retrieval was wired, never a chunk it returned.
+    """
+    if not retrieval.get("enabled"):
+        return _fact("retrieval", '<span class="off">not configured</span>')
+
+    chunks = retrieval.get("indexed_chunks")
+    indexed = (
+        '<span class="off">size unknown</span>'
+        if chunks is None
+        else f"{chunks:,} chunk{'' if chunks == 1 else 's'} indexed"
+    )
+    return (
+        _fact(
+            "retrieval", f'<span class="chip accent">{escape(str(retrieval["retriever"]))}</span>'
+        )
+        + _fact(
+            "vector store",
+            _chips(
+                [part for part in (retrieval["store"], retrieval["embeddings"]) if part],
+                "unknown",
+            ),
+        )
+        + _fact("index", indexed)
+        + _fact(
+            "search",
+            f"top {escape(str(retrieval.get('top_k')))} "
+            f"&middot; score &ge; {escape(str(retrieval.get('score_threshold')))}",
+        )
+    )
+
+
 def _render_page(agent: Any, sink: Any) -> str:
     """Render the dashboard page for an agent.
 
@@ -626,8 +722,8 @@ def _render_page(agent: Any, sink: Any) -> str:
 
     Returns:
         A complete HTML document. It references nothing external -- no CDN, no
-        web font, no image -- so it behaves identically in an air-gapped
-        network, which is the environment this project is aimed at.
+        web font, no image request, not even for the logo, which is drawn as
+        inline SVG -- so it behaves identically in an air-gapped network.
 
     Example:
         >>> page = _render_page(object(), None)
@@ -640,14 +736,6 @@ def _render_page(agent: Any, sink: Any) -> str:
     name = str(described["name"])
     mode = _sink_mode(sink)
     script = f"<script>{_SCRIPT}</script>" if mode != "none" else ""
-
-    facts = (
-        f'<dt>type</dt><dd class="mono">{escape(str(described["type"]))}</dd>'
-        f"<dt>tools</dt><dd>{_chips(described['tools'], 'none attached')}</dd>"
-        f"<dt>guardrails</dt><dd>{_chips(described['guardrails'], 'none attached')}</dd>"
-        f"<dt>retrieval</dt><dd>{_enabled(described['retrieval_enabled'])}</dd>"
-        f"<dt>telemetry</dt><dd>{_enabled(described['telemetry_enabled'])}</dd>"
-    )
 
     runbar = ""
     if mode != "none":
@@ -681,19 +769,55 @@ def _render_page(agent: Any, sink: Any) -> str:
     else:
         picture = f'<div class="empty">{escape(topology.reason or "No graph to draw.")}</div>'
 
+    orchestration = described["orchestration"]
+    iterations = orchestration.get("max_tool_iterations")
+    policy = orchestration.get("guardrail_error_policy")
+
+    runtime = (
+        _fact("runtime", f'<span class="mono">{escape(str(described["type"]))}</span>')
+        + _fact(
+            "model",
+            f'<span class="chip accent">{escape(str(described["model"]))}</span>'
+            if described["model"]
+            else '<span class="off">none</span>',
+        )
+        + _fact("telemetry", _enabled(described["telemetry_enabled"]))
+    )
+    governance = (
+        _fact("guardrails", _chips(described["guardrails"], "none attached"))
+        + _fact("tools", _chips(described["tools"], "none attached"))
+        + _fact(
+            "tool loop",
+            '<span class="off">n/a</span>'
+            if iterations is None
+            else f"at most {escape(str(iterations))} round trips",
+        )
+        + _fact(
+            "if a guardrail raises",
+            '<span class="off">n/a</span>'
+            if policy is None
+            else f'<span class="mono">{escape(str(policy))}</span>',
+        )
+    )
+
     return (
         "<!doctype html>\n"
         '<html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f"<title>{escape(_PAGE_TITLE)} &middot; {escape(name)}</title>"
         f'<style>{_STYLE}</style></head><body><div class="wrap">'
+        f'<div class="brand">{_LOGO}<span class="wordmark">Wardhook</span></div>'
         f"<h1>{escape(name)}</h1>"
-        f'<div class="sub">Structure and cost of this agent. '
+        f'<div class="sub">How this agent is wired, and what its runs cost. '
         f"No prompts, no responses, no retrieved text.</div>"
         f'<div class="banner {escape(mode)}">{escape(_MODE_NOTES[mode])}</div>'
-        f'<section class="card"><h2>Topology</h2>{runbar}{picture}</section>'
+        f'<section class="card"><h2>Orchestration</h2>{runbar}{picture}</section>'
         f'<section class="card"><h2>Configuration</h2>'
-        f'<dl class="facts">{facts}</dl></section>'
+        f'<dl class="facts">{runtime}</dl>'
+        f'<div class="group"><dl class="facts">{governance}</dl></div>'
+        f'<div class="group"><dl class="facts">'
+        f"{_retrieval_facts(described['retrieval'])}</dl></div>"
+        f"</section>"
         f"<footer>Served by wardhook-core. This page shows telemetry and "
         f"configuration only -- never prompts, model output, retrieved context "
         f"or guardrail event bodies. Use a run's run_id to correlate it with "

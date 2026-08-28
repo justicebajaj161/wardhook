@@ -173,6 +173,32 @@ structure, and drawing it is arithmetic. Because the graph is built to fit the
 configuration, the picture is too: an agent with no retriever has no `retrieve`
 box because it has no `retrieve` node.
 
+## Decision: the page describes the wiring, not just the shape
+
+The diagram answers *what runs, in what order*. It cannot answer *is this thing
+going to find anything*, and that is the question a developer actually has after
+adding a retriever. So `describe_agent` reports the vector store and embeddings
+classes, the top-k and score threshold, and **the number of chunks indexed**.
+
+The chunk count is the one that earns its place. An agent whose store is empty
+looks identical to a working one — same graph, same nodes, same green run — until
+you notice it is answering from nothing. `0 chunks indexed` is the tell, and it
+costs one `len()`.
+
+Every value shown is a constructor argument or an index size: how the agent was
+wired, never anything it retrieved. That keeps the rule above intact. A store
+from outside Wardhook need not implement `__len__`, and reports `size unknown`
+rather than failing an information panel.
+
+## Decision: the logo is drawn, not embedded
+
+The mark in the page header is inline SVG, about 700 bytes. A base64 PNG would
+have been roughly forty times larger, would blur on a high-density display, and
+— because it would arrive as `src="data:..."` — would trip the page's own
+no-external-resource assertion. That assertion is worth keeping sharper than the
+logo. Drawn as SVG it is also stroked with the brand gradient tokens, which are
+redefined under `prefers-color-scheme`, so one mark works on both themes.
+
 ## Decision: the dashboard takes two opt-ins to reach a network
 
 It is off unless `dashboard=True`, `--dashboard`, or `WARDHOOK_DASHBOARD=1` says

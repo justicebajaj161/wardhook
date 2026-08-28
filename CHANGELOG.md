@@ -30,6 +30,20 @@ All four packages are versioned in lockstep while the project is pre-1.0.
   Both answer "what is this agent, as plain data", and the application and the
   dashboard both need it — keeping it in either one would have made them import
   each other.
+- **The dashboard describes the wiring, not just the graph.**
+  `wardhook.core.serve.describe_agent()` — and therefore `GET /info`,
+  `wardhook info` and the dashboard — now reports the model, the retriever,
+  vector store and embeddings classes, the top-k and score threshold, **the
+  number of chunks indexed**, the tool-iteration limit, and the guardrail error
+  policy. All of it constructor arguments or an index size; none of it anything
+  the agent processed. The chunk count is the one that matters in practice: an
+  agent whose store is empty looks identical to a working one until it says
+  `0 chunks indexed`.
+- **A visual pass over the dashboard**, with the Wardhook mark drawn as inline
+  SVG in the header — about 700 bytes, crisp at any size, and stroked with brand
+  tokens that are redefined for dark mode, so one mark works on both themes. A
+  base64 PNG would have been ~40x larger and would have tripped the page's own
+  no-external-resource assertion.
 - **The trace overlay.** Picking a run shades each node by how long it took and
   writes its tokens and cost underneath, so the architecture diagram and the
   bill are one picture. A node visited more than once — `call_model` on every
