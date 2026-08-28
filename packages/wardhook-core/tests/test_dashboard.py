@@ -9,6 +9,7 @@ that it reads a sink structurally rather than depending on one.
 from __future__ import annotations
 
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -507,3 +508,92 @@ class TestAgainstTheRealAgent:
 
         assert run["steps"], "the run recorded no steps"
         assert {s["node"] for s in run["steps"]} <= topology_keys
+
+
+class TestPageSelfContainment:
+    def test_no_external_resource_is_referenced(self, full_agent):
+        # The same assertion wardhook-observability makes about its static
+        # viewer, mirrored here rather than shared. It cannot be shared: that
+        # file lives in a sibling package and core must pass with no sibling
+        # installed. So the promise is duplicated, because the promise matters
+        # more than the duplication -- this page has to work in an air-gapped
+        # network, which is exactly where a governance tool earns its place.
+        page = TestClient(create_dashboard(full_agent)).get("/").text
+        external = re.findall(r'(?:src|href)\s*=\s*["\'](?!#)([^"\']+)', page)
+        assert external == [], f"page references external resources: {external}"
+        for scheme in ("http://", "https://", "//cdn", "@import"):
+            assert scheme not in page
+
+    def test_every_script_on_the_page_is_inline(self, full_agent):
+        # Stated as an invariant rather than a count, so it keeps holding as the
+        # page grows: a script may exist, but it may never be fetched.
+        page = TestClient(create_dashboard(full_agent)).get("/").text
+        for tag in re.findall(r"<script[^>]*>", page):
+            assert "src" not in tag, f"script loads an external file: {tag}"
+
+    def test_the_page_is_served_as_html(self, bare_agent):
+        response = TestClient(create_dashboard(bare_agent)).get("/")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        assert response.text.startswith("<!doctype html>")
+
+    def test_the_page_is_not_in_the_openapi_schema(self, bare_agent):
+        # It is a page, not an API. Listing it as an endpoint would suggest a
+        # machine-readable contract that does not exist.
+        client = TestClient(create_dashboard(bare_agent))
+        assert "/" not in client.get("/openapi.json").json()["paths"]
+
+
+class TestPageContent:
+    def test_it_names_the_agent_and_its_configuration(self, full_agent):
+        page = TestClient(create_dashboard(full_agent)).get("/").text
+        assert "<h1>full</h1>" in page
+        assert "lookup_account" in page
+        assert "allower" in page
+
+    def test_an_agent_with_nothing_attached_says_so(self, bare_agent):
+        page = TestClient(create_dashboard(bare_agent)).get("/").text
+        assert page.count("none attached") == 2
+        assert "disabled" in page
+
+    def test_the_mode_banner_states_the_multi_worker_limitation(self, bare_agent):
+        # An observability tool that quietly loses three quarters of the data is
+        # worse than one that refuses to pretend otherwise.
+        page = TestClient(create_dashboard(bare_agent, telemetry=MemorySink())).get("/").text
+        assert 'class="banner memory"' in page
+        assert "1/N of traffic" in page
+
+    def test_a_shared_store_gets_the_reassuring_banner(self, bare_agent):
+        page = TestClient(create_dashboard(bare_agent, telemetry=StoreSink())).get("/").text
+        assert 'class="banner store"' in page
+
+    def test_no_telemetry_gets_the_neutral_banner(self, bare_agent):
+        page = TestClient(create_dashboard(bare_agent)).get("/").text
+        assert 'class="banner none"' in page
+
+    def test_the_footer_states_what_the_page_will_never_show(self, bare_agent):
+        page = TestClient(create_dashboard(bare_agent)).get("/").text
+        assert "never prompts, model output, retrieved context" in page
+        assert "makes no network requests" in page
+
+
+class TestPageEscaping:
+    def test_a_guardrail_named_like_markup_survives_inert(self, make_model):
+        # Guardrail and tool names come from user code. If a rendered name is
+        # ever served over HTTP unescaped, that is stored cross-site scripting.
+        class Nasty:
+            name = "<script>alert(1)</script>"
+
+            def on_input(self, text, context):
+                return None
+
+        agent = AgentGraph(model=make_model("ok"), guardrails=[Nasty()], name="x")
+        page = TestClient(create_dashboard(agent)).get("/").text
+        assert "<script>alert(1)</script>" not in page
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page
+
+    def test_an_agent_named_like_markup_survives_inert(self, make_model):
+        agent = AgentGraph(model=make_model("ok"), name='"><img onerror=alert(1)>')
+        page = TestClient(create_dashboard(agent)).get("/").text
+        assert "<img onerror" not in page
+        assert "&lt;img onerror=alert(1)&gt;" in page

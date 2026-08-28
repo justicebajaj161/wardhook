@@ -21,6 +21,12 @@ All four packages are versioned in lockstep while the project is pre-1.0.
   `TopologyNode` and `TopologyEdge` records it returns. Anything without a
   graph — a plain callable with `.invoke()` is a supported target — reports
   `available=False` with a reason rather than raising.
+- **A self-contained dashboard page** at the dashboard's mount root. One HTML
+  document with its CSS inlined: no CDN, no web font, no image request, so it
+  behaves identically in an air-gapped network. It names the agent, lists its
+  tools and guardrails, and states in a banner which telemetry mode it is in.
+  Every interpolated value is escaped — tool and guardrail names come from user
+  code, and this page really is served over HTTP.
 
 ### Notes
 

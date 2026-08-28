@@ -42,14 +42,19 @@ three quarters of the data is worse than one that says so.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from html import escape
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 
 from wardhook.core.serve.app import _describe
 from wardhook.core.serve.topology import read_topology
 
 __all__ = ["create_dashboard"]
+
+_PAGE_TITLE = "Wardhook Dashboard"
 
 # Method names understood on a telemetry sink, paired with the mode each implies.
 # Order matters only in that the in-memory shape is checked first; the two sinks
@@ -80,6 +85,74 @@ _MODE_NOTES: dict[str, str] = {
 # unusable on exactly the deployment that needs it most.
 _MAX_LIMIT = 1000
 _DEFAULT_LIMIT = 100
+
+
+# Copied from `wardhook.observability.viewer.html`, not imported from it.
+# `wardhook-core` must install and pass with no sibling package present, and
+# `make solo` is the check -- so the CSS is duplicated on purpose. That
+# duplication is the price of independent installability, and it is a price
+# worth paying: the alternative is a core package that cannot be installed
+# without an observability package it does not otherwise need.
+_STYLE = """
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff; --fg: #1a1d23; --muted: #6b7280; --line: #e5e7eb;
+  --panel: #f9fafb; --bar: #3b82f6; --bar-soft: #dbeafe;
+  --err-fg: #991b1b; --err-bg: #fef2f2; --err-line: #fecaca;
+  --warn-fg: #92400e; --warn-bg: #fffbeb; --warn-line: #fde68a;
+  --ok-fg: #065f46; --ok-bg: #ecfdf5; --ok-line: #a7f3d0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115; --fg: #e6e8eb; --muted: #9aa1ab; --line: #262a31;
+    --panel: #161a20; --bar: #60a5fa; --bar-soft: #1e3a5f;
+    --err-fg: #fca5a5; --err-bg: #2a1416; --err-line: #7f1d1d;
+    --warn-fg: #fcd34d; --warn-bg: #241c07; --warn-line: #78500a;
+    --ok-fg: #6ee7b7; --ok-bg: #06231a; --ok-line: #0f5132;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 2rem 1.25rem; background: var(--bg); color: var(--fg);
+  font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.wrap { max-width: 1080px; margin: 0 auto; }
+h1 { font-size: 1.4rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
+h2 { font-size: .95rem; margin: 0 0 .75rem; letter-spacing: -.005em; }
+.sub { color: var(--muted); font-size: .85rem; margin-bottom: 1.5rem; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.card {
+  border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem;
+  margin-bottom: 1.25rem; background: var(--panel);
+}
+.banner {
+  border: 1px solid var(--line); border-left-width: 4px; border-radius: 6px;
+  padding: .7rem .85rem; margin-bottom: 1.25rem; font-size: .85rem;
+}
+.banner.memory { border-color: var(--warn-line); background: var(--warn-bg); color: var(--warn-fg); }
+.banner.store { border-color: var(--ok-line); background: var(--ok-bg); color: var(--ok-fg); }
+.banner.none { border-color: var(--line); background: var(--panel); color: var(--muted); }
+.facts { display: grid; grid-template-columns: 10rem 1fr; gap: .45rem 1rem; font-size: .87rem; }
+.facts dt {
+  color: var(--muted); font-size: .72rem; text-transform: uppercase;
+  letter-spacing: .05em; padding-top: .18rem;
+}
+.facts dd { margin: 0; }
+.chip {
+  display: inline-block; border: 1px solid var(--line); border-radius: 999px;
+  padding: .08rem .55rem; margin: 0 .3rem .3rem 0; font-size: .8rem; background: var(--bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.off { color: var(--muted); }
+.empty {
+  color: var(--muted); padding: 1.5rem; text-align: center;
+  border: 1px dashed var(--line); border-radius: 10px;
+}
+footer {
+  color: var(--muted); font-size: .78rem; margin-top: 2rem;
+  border-top: 1px solid var(--line); padding-top: .85rem;
+}
+"""
 
 
 def _optional_str(value: Any) -> str | None:
@@ -186,21 +259,38 @@ def _summarise(projected: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in projected.items() if key != "steps"}
 
 
-def _list_traces(sink: Any) -> tuple[list[Any], str]:
+def _sink_mode(sink: Any) -> str:
+    """Report which telemetry shape was found, without reading anything.
+
+    Args:
+        sink: The telemetry sink, or ``None``.
+
+    Returns:
+        ``"memory"``, ``"store"``, or ``"none"``. The mode is published rather
+        than kept private because it is the difference between seeing all of an
+        agent's traffic and seeing one worker process's share of it.
+    """
+    for name, mode in _LIST_METHODS:
+        if callable(getattr(sink, name, None)):
+            return mode
+    return "none"
+
+
+def _list_traces(sink: Any) -> list[Any]:
     """Read every run a sink is willing to list.
 
     Args:
         sink: The telemetry sink, or ``None``.
 
     Returns:
-        A tuple of the traces (oldest first, as both known sinks report them)
-        and the mode that reading them implies.
+        The traces, oldest first, as both known sinks report them. An empty
+        list when the sink cannot list runs -- which is not an error.
     """
-    for name, mode in _LIST_METHODS:
+    for name, _ in _LIST_METHODS:
         reader = getattr(sink, name, None)
         if callable(reader):
-            return list(reader()), mode
-    return [], "none"
+            return list(reader())
+    return []
 
 
 def _find_trace(sink: Any, run_id: str) -> Any:
@@ -237,6 +327,89 @@ def _resolve_telemetry(agent: Any, telemetry: Any) -> Any:
     return telemetry if telemetry is not None else getattr(agent, "telemetry", None)
 
 
+def _enabled(flag: Any) -> str:
+    """Render an on/off configuration flag.
+
+    Args:
+        flag: The flag's value.
+
+    Returns:
+        HTML reading ``enabled`` or ``disabled``.
+    """
+    return "enabled" if flag else '<span class="off">disabled</span>'
+
+
+def _chips(values: Sequence[str], empty: str) -> str:
+    """Render a list of names as escaped chips.
+
+    Args:
+        values: The names to render.
+        empty: Text to show instead when there are none.
+
+    Returns:
+        HTML. Every name is escaped: tool and guardrail names come from user
+        code and are therefore untrusted markup, exactly as trace content is in
+        the static viewer, where the same escaping is documented as a security
+        control. It matters more here, because this page really is served over
+        HTTP rather than opened from a local file.
+    """
+    if not values:
+        return f'<span class="off">{escape(empty)}</span>'
+    return "".join(f'<span class="chip">{escape(str(value))}</span>' for value in values)
+
+
+def _render_page(agent: Any, sink: Any) -> str:
+    """Render the dashboard page for an agent.
+
+    Args:
+        agent: The agent being described.
+        sink: The telemetry sink the dashboard reads, or ``None``.
+
+    Returns:
+        A complete HTML document. It references nothing external -- no CDN, no
+        web font, no image -- so it behaves identically in an air-gapped
+        network, which is the environment this project is aimed at.
+
+    Example:
+        >>> page = _render_page(object(), None)
+        >>> page.startswith("<!doctype html>")
+        True
+        >>> "http" + "://" in page
+        False
+    """
+    described = _describe(agent)
+    name = str(described["name"])
+    mode = _sink_mode(sink)
+
+    facts = (
+        f'<dt>type</dt><dd class="mono">{escape(str(described["type"]))}</dd>'
+        f"<dt>tools</dt><dd>{_chips(described['tools'], 'none attached')}</dd>"
+        f"<dt>guardrails</dt><dd>{_chips(described['guardrails'], 'none attached')}</dd>"
+        f"<dt>retrieval</dt><dd>{_enabled(described['retrieval_enabled'])}</dd>"
+        f"<dt>telemetry</dt><dd>{_enabled(described['telemetry_enabled'])}</dd>"
+    )
+
+    return (
+        "<!doctype html>\n"
+        '<html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{escape(_PAGE_TITLE)} &middot; {escape(name)}</title>"
+        f'<style>{_STYLE}</style></head><body><div class="wrap">'
+        f"<h1>{escape(name)}</h1>"
+        f'<div class="sub">Structure and cost of this agent. '
+        f"No prompts, no responses, no retrieved text.</div>"
+        f'<div class="banner {escape(mode)}">{escape(_MODE_NOTES[mode])}</div>'
+        f'<section class="card"><h2>Configuration</h2>'
+        f'<dl class="facts">{facts}</dl></section>'
+        f"<footer>Served by wardhook-core. This page shows telemetry and "
+        f"configuration only -- never prompts, model output, retrieved context "
+        f"or guardrail event bodies. Use a run's run_id to correlate it with "
+        f"your own audit log, where your redaction policy applies. This page "
+        f"makes no network requests.</footer>"
+        f"</div></body></html>"
+    )
+
+
 def create_dashboard(agent: Any, telemetry: Any = None) -> FastAPI:
     """Build the read-only dashboard API for an agent.
 
@@ -269,6 +442,15 @@ def create_dashboard(agent: Any, telemetry: Any = None) -> FastAPI:
             "Serves telemetry and configuration only, never agent content."
         ),
     )
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    def page() -> str:
+        """Serve the dashboard page.
+
+        Returns:
+            A self-contained HTML document describing this agent.
+        """
+        return _render_page(agent, sink)
 
     @app.get("/api/topology", tags=["dashboard"])
     def topology() -> dict[str, Any]:
@@ -304,8 +486,8 @@ def create_dashboard(agent: Any, telemetry: Any = None) -> FastAPI:
             them. ``mode`` and ``mode_note`` are how the multi-worker limitation
             is disclosed rather than hidden.
         """
-        traces, mode = _list_traces(sink)
-        newest_first = list(reversed(traces))
+        mode = _sink_mode(sink)
+        newest_first = list(reversed(_list_traces(sink)))
         return {
             "mode": mode,
             "mode_note": _MODE_NOTES[mode],
