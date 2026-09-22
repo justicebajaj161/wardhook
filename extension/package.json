@@ -1,0 +1,519 @@
+{
+  "name": "wardhook-vscode",
+  "displayName": "Wardhook",
+  "description": "Find PII and prompt-injection risk in your code, without the text ever leaving your machine.",
+  "version": "0.1.0",
+  "publisher": "wardhook",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/justicebajaj161/wardhook.git"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "pii",
+    "redaction",
+    "guardrails",
+    "llm",
+    "security"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:python",
+    "onLanguage:markdown",
+    "onLanguage:yaml",
+    "onLanguage:json",
+    "onLanguage:jsonl",
+    "onLanguage:plaintext"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "wardhook.scanFile",
+        "title": "Scan Active File",
+        "category": "Wardhook"
+      },
+      {
+        "command": "wardhook.scanWorkspace",
+        "title": "Scan Workspace",
+        "category": "Wardhook"
+      },
+      {
+        "command": "wardhook.redactSelection",
+        "title": "Redact Selection",
+        "category": "Wardhook"
+      },
+      {
+        "command": "wardhook.redactFile",
+        "title": "Redact Entire File",
+        "category": "Wardhook"
+      },
+      {
+        "command": "wardhook.scoreInjection",
+        "title": "Score Active File for Prompt Injection",
+        "category": "Wardhook"
+      },
+      {
+        "command": "wardhook.selectPack",
+        "title": "Select Entity Pack",
+        "category": "Wardhook"
+      },
+      {
+        "command": "wardhook.restartSidecar",
+        "title": "Restart Analyzer",
+        "category": "Wardhook"
+      },
+      {
+        "command": "wardhook.showOutput",
+        "title": "Show Log",
+        "category": "Wardhook"
+      },
+      {
+        "command": "wardhook.signInGitHub",
+        "title": "Sign in to GitHub",
+        "category": "Wardhook"
+      },
+      {
+        "command": "wardhook.syncPolicyPack",
+        "title": "Sync Entity Pack from GitHub",
+        "category": "Wardhook"
+      },
+      {
+        "command": "wardhook.refreshFindings",
+        "title": "Refresh Findings",
+        "category": "Wardhook",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "wardhook.ignoreEntity",
+        "title": "Stop Reporting an Entity",
+        "category": "Wardhook"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "wardhook.redactSelection",
+          "when": "editorHasSelection",
+          "group": "1_modification@10"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "wardhook.refreshFindings",
+          "when": "view == wardhook.findings",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "wardhook.refreshFindings",
+          "when": "false"
+        },
+        {
+          "command": "wardhook.ignoreEntity",
+          "when": "false"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "wardhook",
+          "title": "Wardhook",
+          "icon": "resources/shield.svg"
+        }
+      ]
+    },
+    "views": {
+      "wardhook": [
+        {
+          "id": "wardhook.findings",
+          "name": "Findings",
+          "icon": "resources/shield.svg"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Wardhook",
+      "properties": {
+        "wardhook.pack": {
+          "type": "string",
+          "default": "default",
+          "enum": [
+            "default",
+            "insurance",
+            "healthcare",
+            "fintech"
+          ],
+          "enumDescriptions": [
+            "General-purpose entities: email, phone, SSN, credit card, IP, API keys.",
+            "Insurance-specific entities layered on the default pack.",
+            "Healthcare entities such as NHS numbers, layered on the default pack.",
+            "Financial entities such as IBAN, layered on the default pack."
+          ],
+          "description": "Built-in entity pack used for detection."
+        },
+        "wardhook.customPackPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a custom entity pack YAML. Overrides wardhook.pack when set."
+        },
+        "wardhook.minSeverity": {
+          "type": "string",
+          "default": "high",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ],
+          "description": "Lowest severity reported as a diagnostic. Checksum-validated matches are always reported."
+        },
+        "wardhook.validatedOnly": {
+          "type": "boolean",
+          "default": false,
+          "description": "Report only matches confirmed by a checksum (Luhn, IBAN, NHS). Highest precision, lowest recall."
+        },
+        "wardhook.scanOnType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Re-scan as you type. Disable to scan only on save."
+        },
+        "wardhook.debounceMs": {
+          "type": "number",
+          "default": 150,
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "Idle time before re-scanning a changed document."
+        },
+        "wardhook.excludeGlobs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/tests/**",
+            "**/test/**",
+            "**/node_modules/**",
+            "**/.venv/**",
+            "**/*_test.py",
+            "**/test_*.py"
+          ],
+          "description": "Globs excluded from scanning. Test fixtures usually contain deliberate sample PII."
+        },
+        "wardhook.maxFileSizeKb": {
+          "type": "number",
+          "default": 1024,
+          "description": "Skip files larger than this, in kilobytes."
+        },
+        "wardhook.injectionThreshold": {
+          "type": "number",
+          "default": 0.5,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Prompt-injection score at or above which text is reported."
+        },
+        "wardhook.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Python interpreter for the analyzer. Empty means use the Python extension's selected interpreter, then python3 on PATH."
+        },
+        "wardhook.policyPackRepo": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub repo holding a shared entity pack, as owner/repo."
+        },
+        "wardhook.policyPackPath": {
+          "type": "string",
+          "default": "wardhook-pack.yaml",
+          "description": "Path to the entity pack YAML inside wardhook.policyPackRepo."
+        }
+      }
+    },
+    "chatParticipants": [
+      {
+        "id": "wardhook.chat",
+        "name": "wardhook",
+        "fullName": "Wardhook",
+        "description": "Find and redact PII, score prompt-injection risk, inspect entity packs.",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "scan",
+            "description": "Scan the active file, or the workspace, for PII."
+          },
+          {
+            "name": "redact",
+            "description": "Show the active file or selection with PII redacted."
+          },
+          {
+            "name": "packs",
+            "description": "List the entity packs and what each one detects."
+          },
+          {
+            "name": "policy",
+            "description": "Check whether a role may call a named tool."
+          }
+        ]
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "wardhook_scan_pii",
+        "displayName": "Scan text for PII",
+        "toolReferenceName": "scanPii",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(shield)",
+        "userDescription": "Find personal data in a file or snippet.",
+        "modelDescription": "Detect personally identifiable information in a file or a text snippet. Returns one record per match with the entity type, character offsets, line number, severity and whether a checksum validated it. The matched value itself is never returned. Use this before sharing code, logs or prompts.",
+        "tags": [
+          "wardhook",
+          "security",
+          "pii"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "filePath": {
+              "type": "string",
+              "description": "Absolute or workspace-relative path to scan. Omit to use `text`."
+            },
+            "text": {
+              "type": "string",
+              "description": "Raw text to scan. Ignored when `filePath` is given."
+            },
+            "pack": {
+              "type": "string",
+              "enum": [
+                "default",
+                "insurance",
+                "healthcare",
+                "fintech"
+              ],
+              "description": "Entity pack. Defaults to the configured one."
+            }
+          }
+        }
+      },
+      {
+        "name": "wardhook_redact",
+        "displayName": "Redact PII",
+        "toolReferenceName": "redact",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(replace-all)",
+        "userDescription": "Replace personal data with placeholders.",
+        "modelDescription": "Replace every detected piece of personal data in a file or snippet with a typed placeholder such as [US_SSN] or [CREDIT_CARD]. Returns the redacted text plus a count per entity type. Use this to produce a safe-to-share version of something.",
+        "tags": [
+          "wardhook",
+          "security",
+          "pii"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "filePath": {
+              "type": "string",
+              "description": "Path whose contents to redact. Omit to use `text`."
+            },
+            "text": {
+              "type": "string",
+              "description": "Raw text to redact. Ignored when `filePath` is given."
+            },
+            "pack": {
+              "type": "string",
+              "enum": [
+                "default",
+                "insurance",
+                "healthcare",
+                "fintech"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "name": "wardhook_scan_workspace",
+        "displayName": "Scan workspace for PII",
+        "toolReferenceName": "scanWorkspace",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(search)",
+        "userDescription": "Scan many files at once.",
+        "modelDescription": "Scan every matching file in the open workspace for personal data and return a rollup: total matches, a breakdown by entity type and severity, and the worst files ranked. Respects the configured exclude globs. Use this to answer questions about the project as a whole rather than one file.",
+        "tags": [
+          "wardhook",
+          "security",
+          "pii"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "include": {
+              "type": "string",
+              "description": "Glob of files to scan. Defaults to common source and text files."
+            },
+            "maxFiles": {
+              "type": "number",
+              "description": "Stop after this many files. Defaults to 500."
+            }
+          }
+        }
+      },
+      {
+        "name": "wardhook_score_injection",
+        "displayName": "Score prompt-injection risk",
+        "toolReferenceName": "scoreInjection",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(warning)",
+        "userDescription": "Score text for prompt-injection signals.",
+        "modelDescription": "Score a file or snippet for prompt-injection signals such as instruction overrides, role reassignment, exfiltration requests and obfuscated payloads. Returns a score from 0 to 1, the threshold, a severity band, and which signal categories fired with their weights. This is a whole-text score with no character offsets, so do not present it as a highlighted span.",
+        "tags": [
+          "wardhook",
+          "security",
+          "injection"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "filePath": {
+              "type": "string",
+              "description": "Path to score. Omit to use `text`."
+            },
+            "text": {
+              "type": "string",
+              "description": "Raw text to score. Ignored when `filePath` is given."
+            },
+            "threshold": {
+              "type": "number",
+              "description": "Score at or above which text counts as blocked. Defaults to the configured value."
+            }
+          }
+        }
+      },
+      {
+        "name": "wardhook_list_packs",
+        "displayName": "List entity packs",
+        "toolReferenceName": "listPacks",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(library)",
+        "userDescription": "Show available entity packs.",
+        "modelDescription": "List the built-in entity packs (default, insurance, healthcare, fintech) and the entity types each one detects. Use this to pick the right pack for a domain before scanning, or to answer what the tool is capable of detecting.",
+        "tags": [
+          "wardhook",
+          "security"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "wardhook_explain_entity",
+        "displayName": "Explain an entity rule",
+        "toolReferenceName": "explainEntity",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(info)",
+        "userDescription": "Explain how one entity type is detected.",
+        "modelDescription": "Explain how a single entity type is detected: its severity, its placeholder, whether a checksum validator confirms it (Luhn, IBAN, NHS), and any context words the rule requires nearby. Use this when asked why something was or was not flagged.",
+        "tags": [
+          "wardhook",
+          "security"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "entity": {
+              "type": "string",
+              "description": "Entity name, such as US_SSN or CREDIT_CARD."
+            },
+            "pack": {
+              "type": "string",
+              "enum": [
+                "default",
+                "insurance",
+                "healthcare",
+                "fintech"
+              ]
+            }
+          },
+          "required": [
+            "entity"
+          ]
+        }
+      },
+      {
+        "name": "wardhook_check_tool_policy",
+        "displayName": "Check tool permission",
+        "toolReferenceName": "checkToolPolicy",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(law)",
+        "userDescription": "Check whether a role may call a tool.",
+        "modelDescription": "Given a role-to-tool-pattern policy, check whether a named role is permitted to call a named tool. Patterns support wildcards such as lookup_*. Returns the decision and the pattern that decided it. Use this to reason about agent tool permissions before wiring them up.",
+        "tags": [
+          "wardhook",
+          "security",
+          "rbac"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string",
+              "description": "Role to test, such as support_agent."
+            },
+            "tool": {
+              "type": "string",
+              "description": "Tool name to test, such as issue_refund."
+            },
+            "policy": {
+              "type": "object",
+              "description": "Role to allowed tool patterns, e.g. {\"support_agent\": [\"lookup_*\"]}.",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "required": [
+            "role",
+            "tool",
+            "policy"
+          ]
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test --ext ts",
+    "pretest": "npm run compile-tests && npm run compile",
+    "compile-tests": "tsc -p tsconfig.test.json",
+    "test": "vscode-test",
+    "vsix": "npx --yes @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.7",
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.95.0",
+    "@typescript-eslint/eslint-plugin": "^7.16.0",
+    "@typescript-eslint/parser": "^7.16.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "esbuild": "^0.23.0",
+    "eslint": "^8.57.0",
+    "mocha": "^10.7.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -90,3 +90,11 @@ eval-runs/
 
 # Session handoff notes -- not part of the published project.
 HANDOFF.md
+
+# VS Code extension (extension/). `dist/` and `.vscode/` above are broad, so
+# the extension's committed editor config is re-included explicitly.
+extension/node_modules/
+extension/out/
+extension/*.vsix
+extension/.vscode-test/
+!extension/.vscode/

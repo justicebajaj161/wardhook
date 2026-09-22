@@ -9,7 +9,22 @@ All four packages are versioned in lockstep while the project is pre-1.0.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **A VS Code extension** in [`extension/`](extension), published separately
+  from the Python packages and versioned on its own. It surfaces
+  `wardhook-guardrails` in the editor: live PII diagnostics, quick-fix
+  redactions using the library's own placeholders, a findings panel, four
+  selectable entity packs, an `@wardhook` Copilot Chat participant, and seven
+  language-model tools.
+- The extension talks to a long-lived Python analyzer
+  (`extension/python/wardhook_sidecar.py`) over JSON Lines. Because `PIIMatch`
+  carries offsets rather than the matched text, a scan response describes where
+  a secret is without containing it, and a test asserts that.
+- `make ext-install`, `ext-build`, `ext-test`, `ext-package`, and a separate
+  `.github/workflows/extension.yml`. The four-package matrices, the coverage
+  gate, and the isolation tests are untouched; the analyzer is linted by the
+  same ruff configuration as the packages.
 
 ## [0.2.0] — 2026-08-28
 

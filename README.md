@@ -201,6 +201,37 @@ There is also a JSON API under the same mount — `/api/topology`, `/api/runs`,
 `/api/runs/{run_id}` — if you would rather build your own view. `/api/topology`
 includes Mermaid source for the same graph.
 
+## The VS Code extension
+
+`wardhook-guardrails` depends on PyYAML and nothing else, which makes it fast
+enough to run against a document while you type. [`extension/`](extension) is a
+VS Code extension that does exactly that: PII squiggles as you type, quick
+fixes that replace a finding with its typed placeholder, a findings panel, and
+an `@wardhook` participant in Copilot Chat backed by seven language-model
+tools.
+
+It runs the library in one long-lived Python process. The import costs ~160ms
+once at activation; a warm scan of a 38KB file then round-trips in about 12ms.
+
+The detector's refusal to store what it matched pays off here. `PIIMatch` holds
+offsets, not text, so the extension draws a squiggle over a secret it was never
+given — and a test asserts the scan response for a card number does not contain
+that number.
+
+Defaults are tuned for precision. Scanning this repository raw yields 89
+matches, 79 of which are docstring examples and default config values; the
+shipped filter reports 8.
+
+All it asks of a new machine is Python 3.10+; if the package is missing it
+offers to install it rather than failing with a log to read.
+
+```bash
+make ext-install && make ext-package   # builds an installable .vsix
+```
+
+See [extension/README.md](extension/README.md) for the settings and the full
+measurement table.
+
 ## How it composes without coupling
 
 The interesting constraint is that `AgentGraph(guardrails=[...], telemetry=True)`

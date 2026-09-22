@@ -12,7 +12,8 @@ ALL_PACKAGES := $(PACKAGES) wardhook
 PY ?= python3
 
 .DEFAULT_GOAL := help
-.PHONY: help install lint fmt types test test-cov cov-table solo meta build clean check bench-pii
+.PHONY: help install lint fmt types test test-cov cov-table solo meta build clean check bench-pii \
+        ext-install ext-build ext-test ext-package
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -99,5 +100,26 @@ meta: ## Prove `pip install wardhook` pulls in all four packages
 		assert len(set(seen.values())) == 1, 'versions out of lockstep: %s' % seen; \
 		print('==> pip install wardhook -> ' + ', '.join(sorted(seen)) + ' all at ' + seen['wardhook'])"; \
 	rm -rf .venv-meta
+
+# ---------------------------------------------------------------------------
+# VS Code extension (extension/). Separate from the Python gate above: it has
+# its own toolchain and its own workflow, and `check` deliberately does not
+# depend on it so a broken npm install cannot block a Python change.
+# ---------------------------------------------------------------------------
+
+ext-install: ## Install the extension's npm dependencies
+	cd extension && npm ci || (cd extension && npm install)
+
+ext-build: ## Type-check, lint, and bundle the extension
+	cd extension && npm run typecheck && npm run lint && npm run package
+
+ext-test: ## Run the extension's tests in a real VS Code
+	# Downloads VS Code on first run. The analyzer needs wardhook-guardrails
+	# importable; inside this checkout it is found on PYTHONPATH automatically.
+	cd extension && npm run pretest && npm test
+
+ext-package: ext-build ## Build an installable .vsix
+	cd extension && npm run vsix
+	@echo "==> install it with: code --install-extension extension/*.vsix"
 
 check: lint types test-cov ## Run the full local gate (lint + types + coverage-gated tests)
